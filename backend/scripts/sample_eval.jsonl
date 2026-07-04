@@ -1,0 +1,7 @@
+{"question": "员工每年有多少天带薪年假？", "relevant": ["15 天", "年假"], "ground_truth": "公司为正式员工提供每年 15 天带薪年假。"}
+{"question": "差旅费应该怎么报销？", "relevant": ["OA", "发票", "主管审批"], "ground_truth": "在 OA 系统提交出差申请与发票，经主管审批后由财务打款。"}
+{"question": "新员工试用期是多久？", "relevant": ["试用期", "3 个月"], "ground_truth": "试用期为 3 个月。"}
+{"question": "系统支持哪些文档格式？", "relevant": ["PDF", "Word", "Excel", "Markdown"], "ground_truth": "支持 PDF、Word、Excel、Markdown、TXT、CSV、HTML 与网页 URL。"}
+{"question": "如何联系客户支持？", "relevant": ["support@example.com", "400-000-0000"], "ground_truth": "发送邮件至 support@example.com 或拨打 400-000-0000。"}
+{"question": "系统的检索方式是什么？", "relevant": ["混合检索", "BM25", "RRF"], "ground_truth": "采用向量+BM25 的混合检索，并用 RRF 融合，可选交叉编码器重排。"}
+{"question": "公司是哪一年成立的？", "relevant": ["2018"], "ground_truth": "智汇科技成立于 2018 年。"}

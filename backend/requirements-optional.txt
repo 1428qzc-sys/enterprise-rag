@@ -1,0 +1,10 @@
+# 可选重型依赖：本地 Embedding / 交叉编码器重排 / RAG 评估
+# 需要时单独安装：pip install -r requirements-optional.txt
+
+# ---- 本地 Embedding 与 BGE 重排模型 ----
+sentence-transformers>=3.0
+FlagEmbedding>=1.2
+
+# ---- RAG 质量评估 ----
+ragas>=0.1
+datasets>=2.19
