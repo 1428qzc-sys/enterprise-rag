@@ -131,6 +131,26 @@ docker compose up -d --build
 - 后端接口文档： http://localhost:8000/docs
 - 健康检查： http://localhost:8000/api/health
 
+如本机端口已被其他项目占用，可在 `.env` 中覆盖宿主机端口：
+
+```bash
+FRONTEND_HOST_PORT=18087
+BACKEND_HOST_PORT=18086
+QDRANT_HOST_PORT=16333
+docker compose up -d --build
+```
+
+无真实模型 Key 时，可使用离线 smoke 配置验证 Docker、上传、检索和流式问答链路：
+
+```bash
+EMBEDDING_PROVIDER=fake
+EMBEDDING_MODEL=fake
+EMBEDDING_DIM=64
+LLM_PROVIDER=echo
+LLM_MODEL=echo
+docker compose up -d --build
+```
+
 首次使用：进入前端 → 新建知识库 → 上传 `sample-docs/` 中的示例文档 → 待状态变为「已就绪」→ 在「智能问答」中提问（如“员工每年有多少天年假？”），即可得到带来源引用的流式回答。
 
 ### 方式二：本地开发（零外部依赖）
@@ -147,7 +167,7 @@ uvicorn app.main:app --reload
 
 如需真实问答，在 `backend/.env` 或环境变量中配置 `LLM_*` / `EMBEDDING_*`（见下）。
 
-前端：
+前端（Vite 8 需要 Node.js 20.19+ 或 22.12+）：
 
 ```bash
 cd frontend
@@ -208,7 +228,7 @@ python backend/scripts/evaluate.py --api http://localhost:8000 \
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-pytest            # 离线运行：fake embedding + echo LLM + memory 向量库
+python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 ```
 
 覆盖分块、RRF 融合、中文分词，以及「建库→上传→入库→检索→问答→会话」端到端链路。
