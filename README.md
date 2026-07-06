@@ -3,12 +3,15 @@
 > 一套生产级的企业知识库检索增强问答（RAG）系统：多格式文档接入、**向量 + BM25 混合检索 + 重排**、**流式问答与引用溯源**、多知识库隔离、可插拔的 Embedding/LLM 提供方，一条 `docker compose` 命令即可拉起全套服务。
 
 <p>
+  <img alt="CI" src="https://github.com/Hou-mingyuan/enterprise-rag/actions/workflows/ci.yml/badge.svg">
   <img alt="python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white">
   <img alt="fastapi" src="https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white">
   <img alt="vue" src="https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white">
   <img alt="qdrant" src="https://img.shields.io/badge/Qdrant-vector%20db-DC244C">
   <img alt="license" src="https://img.shields.io/badge/License-MIT-green">
 </p>
+
+📰 **CSDN 长文**：[`docs/csdn/enterprise-rag.md`](docs/csdn/enterprise-rag.md)（架构 mermaid + Docker smoke + 面试 3 问 3 答）
 
 ---
 
@@ -23,7 +26,7 @@
 - **对话记忆 + 多轮改写**：注入历史轮次并对追问做 condense 改写，提升“它多少钱”这类指代问题的召回。
 - **可插拔提供方**：Embedding 与 LLM 支持 **OpenAI 兼容 / DeepSeek / 本地 Ollama / 本地 BGE**，环境变量切换，密钥走 `.env`。
 - **零依赖本地体验**：内置 `memory` 向量后端 + SQLite + `fake/echo` 提供方，无需任何外部服务或密钥即可跑通与测试。
-- **工程化**：清晰分层（core / services / api）、pytest 端到端测试、检索评估脚本（Hit@k / MRR，可选 RAGAS）、Docker 一键部署、CI、部署/运行/安全/性能文档。
+- **生产安全基线**：SSRF 防护、审计日志、安全响应头、请求超时、单进程限流、Alembic 正式迁移骨架、pytest 端到端测试、Docker 一键部署、CI、部署/运行/安全/性能文档。
 
 ## 🏗️ 系统架构
 
@@ -105,6 +108,7 @@ enterprise-rag/
 │  │  ├─ models.py     # SQLModel 数据模型
 │  │  └─ main.py       # FastAPI 入口
 │  ├─ scripts/evaluate.py  # 检索/答案质量评估
+│  ├─ alembic/         # 生产数据库迁移脚本
 │  ├─ tests/           # pytest 端到端测试（离线可跑）
 │  ├─ requirements*.txt
 │  └─ Dockerfile
@@ -114,6 +118,7 @@ enterprise-rag/
 ├─ DEPLOYMENT.md       # 生产部署说明
 ├─ RUNBOOK.md          # 运维运行手册
 ├─ MULTI_TENANCY.md    # 租户与权限模型
+├─ SECURITY.md         # 漏洞报告与安全策略
 ├─ SECURITY_AUDIT.md   # 安全审计记录
 ├─ PERFORMANCE_REPORT.md
 ├─ performance/        # k6 压测脚本
@@ -158,7 +163,18 @@ LLM_MODEL=echo
 docker compose up -d --build
 ```
 
-首次使用：进入前端 → 使用 `.env` 中 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 登录 → 新建知识库 → 上传 `sample-docs/` 中的示例文档 → 待状态变为「已就绪」→ 在「智能问答」中提问（如“员工每年有多少天年假？”），即可得到带来源引用的流式回答。
+### 演示账号（本地 Docker / 开发）
+
+| 字段 | 默认值（`.env.example`） |
+| --- | --- |
+| 邮箱 | `admin@example.com` |
+| 密码 | `ChangeMe123!` |
+
+生产环境必须覆盖 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD`，勿使用默认密码。
+
+公网 HTTPS 部署与验收证据模板见 [DEPLOYMENT.md §8](DEPLOYMENT.md#8-公网-https-部署证据验收模板)；运维 runbook 见 [RUNBOOK.md](RUNBOOK.md)。
+
+首次使用：进入前端 → 用上表账号登录 → 新建知识库 → 上传 `sample-docs/` 中的示例文档 → 待状态变为「已就绪」→ 在「智能问答」中提问（如“员工每年有多少天年假？”），即可得到带来源引用的流式回答。
 
 ### 方式二：本地开发（零外部依赖）
 
@@ -196,13 +212,16 @@ npm run dev        # http://localhost:5173 ，已代理 /api 到 http://localhos
 | --- | --- | --- |
 | `VECTOR_BACKEND` | `qdrant` / `memory` | `memory` |
 | `AUTH_SECRET_KEY` | JWT 签名密钥，生产环境必须覆盖为高熵随机值 | 本地开发默认值 |
-| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | 默认租户管理员引导账号 | `admin@example.com` / 本地演示密码 |
+| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | 默认租户管理员引导账号 | `admin@example.com` / `ChangeMe123!` |
 | `EMBEDDING_DIM` | 向量维度，需与模型匹配（text-embedding-3-small=1536，bge-m3=1024） | `1536` |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 分块大小 / 重叠 | `800` / `120` |
 | `VECTOR_TOP_K` / `BM25_TOP_K` | 两路召回条数 | `20` / `20` |
 | `HYBRID_TOP_K` | 融合/重排后进入上下文条数 | `8` |
 | `RERANK_ENABLED` | 是否启用交叉编码器重排（需 `requirements-optional.txt`） | `false` |
 | `HISTORY_TURNS` | 注入对话记忆的最近轮数 | `6` |
+| `REQUEST_TIMEOUT_SECONDS` | 单请求服务端超时 | `60` |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | 单客户端每分钟请求数上限 | `600` |
+| `URL_FETCH_TIMEOUT_SECONDS` / `URL_FETCH_MAX_REDIRECTS` / `URL_FETCH_MAX_MB` | 外部 URL 抓取超时、重定向与下载大小限制 | `10` / `3` / `5` |
 
 > ⚠️ 更换 Embedding 模型或维度后，请对已有文档执行「重嵌入」，否则向量空间不一致会导致检索异常。
 
@@ -213,6 +232,7 @@ npm run dev        # http://localhost:5173 ，已代理 /api 到 http://localhos
 | POST | `/api/auth/login` | 登录并获取 Bearer token |
 | GET | `/api/auth/me` | 当前登录用户与租户 |
 | GET/POST | `/api/admin/users` | 租户内用户列表 / 创建用户 |
+| GET | `/api/admin/audit-logs` | 租户内关键操作审计日志 |
 | POST | `/api/knowledge-bases` | 创建知识库 |
 | GET | `/api/knowledge-bases` | 知识库列表 |
 | DELETE | `/api/knowledge-bases/{id}` | 删除（级联清理向量/文档/会话） |
@@ -245,7 +265,7 @@ pip install -r requirements-dev.txt
 python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 ```
 
-覆盖分块、RRF 融合、中文分词、认证、租户隔离与越权防护，以及「登录→建库→上传→入库→检索→问答→会话」端到端链路。
+覆盖分块、RRF 融合、中文分词、认证、租户隔离与越权防护、SSRF 拒绝、安全响应头，以及「登录→建库→上传→入库→检索→问答→会话」端到端链路。
 
 ## 🖼️ 界面截图
 
@@ -258,7 +278,8 @@ python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 ## 🗺️ Roadmap
 
 - [x] 用户体系、知识库级权限（RBAC）与租户隔离后端基础
-- [ ] 角色权限管理 UI 与审计日志
+- [x] SSRF 防护、审计日志、安全响应头、请求超时、限流和 Alembic 迁移骨架
+- [ ] 角色权限管理 UI
 - [ ] 文档版本管理与增量更新
 - [ ] 更多重排策略（ColBERT、LLM-as-reranker）与查询扩展
 - [ ] Agentic RAG：多跳检索与工具调用
