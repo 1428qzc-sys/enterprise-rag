@@ -22,16 +22,18 @@ from ..core.vector_store import collection_name, get_vector_store
 from ..database import get_session
 from ..models import Chunk, DocStatus, Document, KnowledgeBase
 from ..schemas import DocumentRead, IngestUrlRequest
+from ..security import Principal
 from ..services import bm25_index
 from ..services.ingestion import process_document
 from ..services.parsing import SUPPORTED_EXTS
+from .deps import can_access_kb, require_permission
 
 router = APIRouter(prefix="/knowledge-bases/{kb_id}/documents", tags=["documents"])
 
 
-def _require_kb(kb_id: str, session: Session) -> KnowledgeBase:
+def _require_kb(kb_id: str, session: Session, principal: Principal) -> KnowledgeBase:
     kb = session.get(KnowledgeBase, kb_id)
-    if kb is None:
+    if kb is None or not can_access_kb(principal, kb):
         raise HTTPException(status_code=404, detail="知识库不存在")
     return kb
 
@@ -41,9 +43,10 @@ async def upload_document(
     kb_id: str,
     background: BackgroundTasks,
     file: UploadFile = File(...),
+    principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_kb(kb_id, session)
+    _require_kb(kb_id, session, principal)
     filename = file.filename or "未命名文件"
     ext = os.path.splitext(filename.lower())[1]
     if ext not in SUPPORTED_EXTS:
@@ -58,6 +61,8 @@ async def upload_document(
         raise HTTPException(status_code=413, detail=f"文件超过 {settings.max_upload_mb}MB 上限")
 
     doc = Document(
+        tenant_id=principal.tenant_id,
+        created_by_user_id=principal.user_id,
         kb_id=kb_id,
         name=filename,
         source_type="file",
@@ -85,14 +90,17 @@ def ingest_url(
     kb_id: str,
     body: IngestUrlRequest,
     background: BackgroundTasks,
+    principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_kb(kb_id, session)
+    _require_kb(kb_id, session, principal)
     url = body.url.strip()
     if not (url.startswith("http://") or url.startswith("https://")):
         raise HTTPException(status_code=400, detail="URL 需以 http:// 或 https:// 开头")
 
     doc = Document(
+        tenant_id=principal.tenant_id,
+        created_by_user_id=principal.user_id,
         kb_id=kb_id,
         name=url,
         source_type="url",
@@ -109,8 +117,12 @@ def ingest_url(
 
 
 @router.get("", response_model=List[DocumentRead])
-def list_documents(kb_id: str, session: Session = Depends(get_session)) -> List[DocumentRead]:
-    _require_kb(kb_id, session)
+def list_documents(
+    kb_id: str,
+    principal: Principal = Depends(require_permission("doc:read")),
+    session: Session = Depends(get_session),
+) -> List[DocumentRead]:
+    _require_kb(kb_id, session, principal)
     docs = session.exec(
         select(Document).where(Document.kb_id == kb_id).order_by(Document.created_at.desc())
     ).all()
@@ -118,8 +130,13 @@ def list_documents(kb_id: str, session: Session = Depends(get_session)) -> List[
 
 
 @router.get("/{document_id}", response_model=DocumentRead)
-def get_document(kb_id: str, document_id: str, session: Session = Depends(get_session)) -> DocumentRead:
-    _require_kb(kb_id, session)
+def get_document(
+    kb_id: str,
+    document_id: str,
+    principal: Principal = Depends(require_permission("doc:read")),
+    session: Session = Depends(get_session),
+) -> DocumentRead:
+    _require_kb(kb_id, session, principal)
     doc = session.get(Document, document_id)
     if doc is None or doc.kb_id != kb_id:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -127,8 +144,13 @@ def get_document(kb_id: str, document_id: str, session: Session = Depends(get_se
 
 
 @router.delete("/{document_id}", status_code=204)
-def delete_document(kb_id: str, document_id: str, session: Session = Depends(get_session)) -> None:
-    _require_kb(kb_id, session)
+def delete_document(
+    kb_id: str,
+    document_id: str,
+    principal: Principal = Depends(require_permission("doc:delete")),
+    session: Session = Depends(get_session),
+) -> None:
+    _require_kb(kb_id, session, principal)
     doc = session.get(Document, document_id)
     if doc is None or doc.kb_id != kb_id:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -154,9 +176,10 @@ def reembed_document(
     kb_id: str,
     document_id: str,
     background: BackgroundTasks,
+    principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
-    _require_kb(kb_id, session)
+    _require_kb(kb_id, session, principal)
     doc = session.get(Document, document_id)
     if doc is None or doc.kb_id != kb_id:
         raise HTTPException(status_code=404, detail="文档不存在")

@@ -82,6 +82,7 @@ def process_document(document_id: str) -> None:
                 meta = dict(cd.meta)
                 meta["document_name"] = doc.name
                 chunk = Chunk(
+                    tenant_id=doc.tenant_id,
                     kb_id=kb.id,
                     document_id=doc.id,
                     chunk_index=i,

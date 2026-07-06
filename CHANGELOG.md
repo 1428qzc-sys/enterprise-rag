@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- 多租户与权限基础：`Tenant` / `User` / `Role` / `Permission` / JWT Bearer 登录。
+- 业务 API 后端权限校验与租户隔离：知识库、文档、检索、问答、会话接口默认需要登录。
+- 租户内用户管理 API：`GET/POST /api/admin/users`。
+- 前端登录页、租户/用户展示、退出入口、Axios 与 SSE Bearer token。
+- GitHub Actions CI：后端测试、前端审计/类型检查/构建、Docker Compose build smoke。
+- 生产化文档：`DEPLOYMENT.md`、`RUNBOOK.md`、`MULTI_TENANCY.md`、`SECURITY_AUDIT.md`、`PERFORMANCE_REPORT.md`。
+- k6 压测脚本：`performance/k6-smoke.js`。
+
+### Security
+
+- 增加未登录访问拒绝测试与跨租户知识库/检索越权测试。
+- 将 `.env.example` 中容易触发 secret 扫描误报的 `sk-*` 占位符替换为普通占位文本。
+
 ### Planned
 
-- 用户体系与知识库级权限（RBAC）
 - 文档版本管理与增量更新
 - 导出对话为 Markdown / PDF
 

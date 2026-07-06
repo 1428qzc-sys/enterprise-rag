@@ -79,13 +79,25 @@ def load_history(session: Session, conversation_id: str, turns: int) -> List[Dic
     return msgs[-turns:] if turns > 0 else msgs
 
 
-def ensure_conversation(session: Session, kb_id: str, conversation_id: Optional[str], question: str) -> Conversation:
+def ensure_conversation(
+    session: Session,
+    kb_id: str,
+    conversation_id: Optional[str],
+    question: str,
+    tenant_id: str = "",
+    user_id: str = "",
+) -> Conversation:
     if conversation_id:
         conv = session.get(Conversation, conversation_id)
-        if conv is not None:
+        if conv is not None and conv.kb_id == kb_id:
             return conv
     title = question.strip().replace("\n", " ")[:24] or "新对话"
-    conv = Conversation(kb_id=kb_id, title=title)
+    conv = Conversation(
+        kb_id=kb_id,
+        tenant_id=tenant_id,
+        created_by_user_id=user_id,
+        title=title,
+    )
     session.add(conv)
     session.commit()
     session.refresh(conv)
@@ -114,9 +126,11 @@ async def _prepare(
     question: str,
     conversation_id: Optional[str],
     top_k: Optional[int],
+    tenant_id: str = "",
+    user_id: str = "",
 ) -> Tuple[Conversation, List[SourceChunk], List[Dict[str, str]], str]:
     """公共准备：建会话、改写、检索、组装消息、落库 user 消息。"""
-    conv = ensure_conversation(session, kb.id, conversation_id, question)
+    conv = ensure_conversation(session, kb.id, conversation_id, question, tenant_id, user_id)
     history = load_history(session, conv.id, settings.history_turns)
 
     used_query = await condense_question(history, question)
@@ -153,10 +167,14 @@ async def run_rag_stream(
     question: str,
     conversation_id: Optional[str] = None,
     top_k: Optional[int] = None,
+    tenant_id: str = "",
+    user_id: str = "",
 ) -> AsyncIterator[Dict]:
     """流式问答，逐事件产出（供 SSE）。"""
     try:
-        conv, sources, messages, used_query = await _prepare(session, kb, question, conversation_id, top_k)
+        conv, sources, messages, used_query = await _prepare(
+            session, kb, question, conversation_id, top_k, tenant_id, user_id
+        )
     except Exception as exc:  # noqa: BLE001
         yield {"event": "error", "data": {"message": f"检索准备失败：{exc}"}}
         return
@@ -184,9 +202,13 @@ async def run_rag(
     question: str,
     conversation_id: Optional[str] = None,
     top_k: Optional[int] = None,
+    tenant_id: str = "",
+    user_id: str = "",
 ) -> Dict:
     """非流式问答，返回完整结果。"""
-    conv, sources, messages, _used = await _prepare(session, kb, question, conversation_id, top_k)
+    conv, sources, messages, _used = await _prepare(
+        session, kb, question, conversation_id, top_k, tenant_id, user_id
+    )
     answer = await make_llm().acomplete(messages)
     _save_answer(session, conv, answer, sources)
     return {

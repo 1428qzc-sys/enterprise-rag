@@ -21,40 +21,64 @@ from ..schemas import (
     RetrieveResponse,
     SourceChunk,
 )
+from ..security import Principal
 from ..services.rag import run_rag, run_rag_stream
 from ..services.retrieval import retrieve
+from .deps import can_access_kb, require_permission
 
 router = APIRouter(tags=["chat"])
 
 
-def _require_kb(kb_id: str, session: Session) -> KnowledgeBase:
+def _require_kb(kb_id: str, session: Session, principal: Principal) -> KnowledgeBase:
     kb = session.get(KnowledgeBase, kb_id)
-    if kb is None:
+    if kb is None or not can_access_kb(principal, kb):
         raise HTTPException(status_code=404, detail="知识库不存在")
     return kb
 
 
 @router.post("/chat")
-async def chat(body: ChatRequest, session: Session = Depends(get_session)):
-    kb = _require_kb(body.kb_id, session)
+async def chat(
+    body: ChatRequest,
+    principal: Principal = Depends(require_permission("chat:use")),
+    session: Session = Depends(get_session),
+):
+    kb = _require_kb(body.kb_id, session, principal)
 
     if body.stream:
 
         async def event_gen():
             async for ev in run_rag_stream(
-                session, kb, body.question, body.conversation_id, body.top_k
+                session,
+                kb,
+                body.question,
+                body.conversation_id,
+                body.top_k,
+                principal.tenant_id,
+                principal.user_id,
             ):
                 yield {"event": ev["event"], "data": json.dumps(ev["data"], ensure_ascii=False)}
 
         return EventSourceResponse(event_gen(), ping=15000)
 
-    result = await run_rag(session, kb, body.question, body.conversation_id, body.top_k)
+    result = await run_rag(
+        session,
+        kb,
+        body.question,
+        body.conversation_id,
+        body.top_k,
+        principal.tenant_id,
+        principal.user_id,
+    )
     return ChatResponse(**result)
 
 
 @router.post("/retrieve", response_model=RetrieveResponse)
-def retrieve_preview(body: RetrieveRequest, session: Session = Depends(get_session)) -> RetrieveResponse:
-    kb = _require_kb(body.kb_id, session)
+def retrieve_preview(
+    body: RetrieveRequest,
+    principal: Principal = Depends(require_permission("chat:use")),
+    session: Session = Depends(get_session),
+) -> RetrieveResponse:
+    kb = _require_kb(body.kb_id, session, principal)
     chunks = retrieve(session, kb, body.query, body.top_k)
     results = [
         SourceChunk(
@@ -73,8 +97,12 @@ def retrieve_preview(body: RetrieveRequest, session: Session = Depends(get_sessi
 
 
 @router.get("/knowledge-bases/{kb_id}/conversations", response_model=List[ConversationRead])
-def list_conversations(kb_id: str, session: Session = Depends(get_session)) -> List[ConversationRead]:
-    _require_kb(kb_id, session)
+def list_conversations(
+    kb_id: str,
+    principal: Principal = Depends(require_permission("chat:use")),
+    session: Session = Depends(get_session),
+) -> List[ConversationRead]:
+    _require_kb(kb_id, session, principal)
     convs = session.exec(
         select(Conversation).where(Conversation.kb_id == kb_id).order_by(Conversation.updated_at.desc())
     ).all()
@@ -82,10 +110,15 @@ def list_conversations(kb_id: str, session: Session = Depends(get_session)) -> L
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=List[MessageRead])
-def list_messages(conversation_id: str, session: Session = Depends(get_session)) -> List[MessageRead]:
+def list_messages(
+    conversation_id: str,
+    principal: Principal = Depends(require_permission("chat:use")),
+    session: Session = Depends(get_session),
+) -> List[MessageRead]:
     conv = session.get(Conversation, conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+    _require_kb(conv.kb_id, session, principal)
     msgs = session.exec(
         select(Message).where(Message.conversation_id == conversation_id).order_by(Message.created_at)
     ).all()
@@ -93,10 +126,15 @@ def list_messages(conversation_id: str, session: Session = Depends(get_session))
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
-def delete_conversation(conversation_id: str, session: Session = Depends(get_session)) -> None:
+def delete_conversation(
+    conversation_id: str,
+    principal: Principal = Depends(require_permission("conversation:delete")),
+    session: Session = Depends(get_session),
+) -> None:
     conv = session.get(Conversation, conversation_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="会话不存在")
+    _require_kb(conv.kb_id, session, principal)
     session.execute(sa_delete(Message).where(Message.conversation_id == conversation_id))
     session.delete(conv)
     session.commit()

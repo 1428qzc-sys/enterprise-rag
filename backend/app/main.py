@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import __version__
-from .api import chat, documents, health, knowledge_bases
+from .api import admin, auth, chat, documents, health, knowledge_bases
 from .config import settings
 from .database import init_db
 
@@ -34,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-for r in (health.router, knowledge_bases.router, documents.router, chat.router):
+for r in (health.router, auth.router, admin.router, knowledge_bases.router, documents.router, chat.router):
     app.include_router(r, prefix=settings.api_prefix)
 
 

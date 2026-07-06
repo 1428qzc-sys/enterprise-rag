@@ -18,11 +18,12 @@
 - **引用溯源**：回答分块编号 `[1][2]`，返回命中的**文档名、页码、原文片段与相关度分数**，答案可核实、可追溯，杜绝“一本正经胡说”。
 - **流式问答**：基于 SSE 的逐 token 流式输出，先返回检索来源、再流式生成，前端实时呈现。
 - **多格式接入**：PDF / Word / Excel / Markdown / TXT / CSV / HTML / 网页 URL，自动解析 → 分块 → 向量化 → 索引，页码信息贯穿至溯源。
+- **多租户权限闭环**：内置租户、用户、角色、权限、JWT Bearer 登录；知识库、文档、会话均由后端按 `tenant_id` 强制隔离。
 - **多知识库隔离**：每个知识库独立 Qdrant collection 与 Embedding 空间快照，创建 / 隔离 / 删除 / 重嵌入一应俱全。
 - **对话记忆 + 多轮改写**：注入历史轮次并对追问做 condense 改写，提升“它多少钱”这类指代问题的召回。
 - **可插拔提供方**：Embedding 与 LLM 支持 **OpenAI 兼容 / DeepSeek / 本地 Ollama / 本地 BGE**，环境变量切换，密钥走 `.env`。
 - **零依赖本地体验**：内置 `memory` 向量后端 + SQLite + `fake/echo` 提供方，无需任何外部服务或密钥即可跑通与测试。
-- **工程化**：清晰分层（core / services / api）、pytest 端到端测试、检索评估脚本（Hit@k / MRR，可选 RAGAS）、Docker 一键部署。
+- **工程化**：清晰分层（core / services / api）、pytest 端到端测试、检索评估脚本（Hit@k / MRR，可选 RAGAS）、Docker 一键部署、CI、部署/运行/安全/性能文档。
 
 ## 🏗️ 系统架构
 
@@ -99,7 +100,7 @@ enterprise-rag/
 │  ├─ app/
 │  │  ├─ core/         # 抽象层：embeddings / llm / vector_store / reranker
 │  │  ├─ services/     # 解析 / 分块 / BM25 / 入库 / 检索 / RAG 编排
-│  │  ├─ api/          # 路由：知识库 / 文档 / 问答 / 会话
+│  │  ├─ api/          # 路由：认证 / 后台用户 / 知识库 / 文档 / 问答 / 会话
 │  │  ├─ config.py     # 配置（pydantic-settings）
 │  │  ├─ models.py     # SQLModel 数据模型
 │  │  └─ main.py       # FastAPI 入口
@@ -109,7 +110,13 @@ enterprise-rag/
 │  └─ Dockerfile
 ├─ frontend/           # Vue3 + Vite 前端
 ├─ sample-docs/        # 示例文档（员工手册/产品FAQ/公司简介）
-├─ docs/               # 架构与截图
+├─ docs/               # 架构与使用指南
+├─ DEPLOYMENT.md       # 生产部署说明
+├─ RUNBOOK.md          # 运维运行手册
+├─ MULTI_TENANCY.md    # 租户与权限模型
+├─ SECURITY_AUDIT.md   # 安全审计记录
+├─ PERFORMANCE_REPORT.md
+├─ performance/        # k6 压测脚本
 ├─ docker-compose.yml
 ├─ .env.example
 └─ README.md
@@ -151,7 +158,7 @@ LLM_MODEL=echo
 docker compose up -d --build
 ```
 
-首次使用：进入前端 → 新建知识库 → 上传 `sample-docs/` 中的示例文档 → 待状态变为「已就绪」→ 在「智能问答」中提问（如“员工每年有多少天年假？”），即可得到带来源引用的流式回答。
+首次使用：进入前端 → 使用 `.env` 中 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 登录 → 新建知识库 → 上传 `sample-docs/` 中的示例文档 → 待状态变为「已就绪」→ 在「智能问答」中提问（如“员工每年有多少天年假？”），即可得到带来源引用的流式回答。
 
 ### 方式二：本地开发（零外部依赖）
 
@@ -188,6 +195,8 @@ npm run dev        # http://localhost:5173 ，已代理 /api 到 http://localhos
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
 | `VECTOR_BACKEND` | `qdrant` / `memory` | `memory` |
+| `AUTH_SECRET_KEY` | JWT 签名密钥，生产环境必须覆盖为高熵随机值 | 本地开发默认值 |
+| `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | 默认租户管理员引导账号 | `admin@example.com` / 本地演示密码 |
 | `EMBEDDING_DIM` | 向量维度，需与模型匹配（text-embedding-3-small=1536，bge-m3=1024） | `1536` |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 分块大小 / 重叠 | `800` / `120` |
 | `VECTOR_TOP_K` / `BM25_TOP_K` | 两路召回条数 | `20` / `20` |
@@ -201,6 +210,9 @@ npm run dev        # http://localhost:5173 ，已代理 /api 到 http://localhos
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| POST | `/api/auth/login` | 登录并获取 Bearer token |
+| GET | `/api/auth/me` | 当前登录用户与租户 |
+| GET/POST | `/api/admin/users` | 租户内用户列表 / 创建用户 |
 | POST | `/api/knowledge-bases` | 创建知识库 |
 | GET | `/api/knowledge-bases` | 知识库列表 |
 | DELETE | `/api/knowledge-bases/{id}` | 删除（级联清理向量/文档/会话） |
@@ -210,6 +222,8 @@ npm run dev        # http://localhost:5173 ，已代理 /api 到 http://localhos
 | POST | `/api/retrieve` | 检索预览（调参/评估用，不走 LLM） |
 | POST | `/api/chat` | RAG 问答（`stream=true` 走 SSE） |
 | GET | `/api/conversations/{id}/messages` | 会话消息 |
+
+除 `/api/health` 与 `/api/auth/login` 外，业务 API 均需要 `Authorization: Bearer <token>`。
 
 完整交互式文档见 `/docs`（Swagger UI）。
 
@@ -231,7 +245,7 @@ pip install -r requirements-dev.txt
 python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 ```
 
-覆盖分块、RRF 融合、中文分词，以及「建库→上传→入库→检索→问答→会话」端到端链路。
+覆盖分块、RRF 融合、中文分词、认证、租户隔离与越权防护，以及「登录→建库→上传→入库→检索→问答→会话」端到端链路。
 
 ## 🖼️ 界面截图
 
@@ -243,7 +257,8 @@ python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 
 ## 🗺️ Roadmap
 
-- [ ] 用户体系与知识库级权限（RBAC）
+- [x] 用户体系、知识库级权限（RBAC）与租户隔离后端基础
+- [ ] 角色权限管理 UI 与审计日志
 - [ ] 文档版本管理与增量更新
 - [ ] 更多重排策略（ColBERT、LLM-as-reranker）与查询扩展
 - [ ] Agentic RAG：多跳检索与工具调用

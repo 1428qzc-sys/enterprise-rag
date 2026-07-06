@@ -12,6 +12,34 @@ export interface KnowledgeBase {
   updated_at: string;
 }
 
+export interface TenantInfo {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface AuthUser {
+  id: string;
+  tenant_id: string;
+  email: string;
+  display_name: string;
+  is_active: boolean;
+  is_superuser: boolean;
+  permissions: string[];
+}
+
+export interface AuthResponse {
+  access_token: string;
+  token_type: "bearer";
+  user: AuthUser;
+  tenant: TenantInfo;
+}
+
+export interface MeResponse {
+  user: AuthUser;
+  tenant: TenantInfo;
+}
+
 export interface DocumentItem {
   id: string;
   kb_id: string;

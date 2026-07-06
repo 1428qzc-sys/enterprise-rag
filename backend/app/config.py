@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     # 逗号分隔的允许来源；"*" 表示放开（开发用）
     cors_origins: str = "*"
 
+    # ---------------- 认证 / 多租户 ----------------
+    # 生产环境必须覆盖为高熵随机值；默认值仅用于本地 smoke 与测试。
+    auth_secret_key: str = "dev-change-me-enterprise-rag"
+    access_token_expire_minutes: int = 480
+    bootstrap_tenant_name: str = "Demo Enterprise"
+    bootstrap_tenant_slug: str = "demo"
+    bootstrap_admin_email: str = "admin@example.com"
+    bootstrap_admin_password: str = "ChangeMe123!"
+    bootstrap_admin_name: str = "系统管理员"
+
     # ---------------- 数据库 ----------------
     # 本地零配置默认 SQLite；docker-compose 中注入 PostgreSQL DSN
     database_url: str = "sqlite:///./data/enterprise_rag.db"

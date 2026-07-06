@@ -9,6 +9,47 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 # ==================== 知识库 ====================
+class TenantRead(BaseModel):
+    id: str
+    name: str
+    slug: str
+
+
+class UserRead(BaseModel):
+    id: str
+    tenant_id: str
+    email: str
+    display_name: str
+    is_active: bool
+    is_superuser: bool
+    permissions: List[str] = []
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
+    tenant: TenantRead
+
+
+class MeResponse(BaseModel):
+    user: UserRead
+    tenant: TenantRead
+
+
+class AdminUserCreate(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    password: str = Field(..., min_length=8, max_length=256)
+    display_name: str = Field(default="", max_length=64)
+    is_active: bool = True
+    is_superuser: bool = False
+
+
 class KBCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: str = ""
@@ -21,6 +62,7 @@ class KBUpdate(BaseModel):
 
 class KBRead(BaseModel):
     id: str
+    tenant_id: str
     name: str
     description: str
     embedding_provider: str

@@ -1,15 +1,46 @@
 import axios from "axios";
 import type {
+  AuthResponse,
   ChatMessage,
   Conversation,
   DocumentItem,
   KnowledgeBase,
+  MeResponse,
   SourceChunk,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+const TOKEN_KEY = "enterprise-rag.access-token";
 
 export const http = axios.create({ baseURL: API_BASE, timeout: 60000 });
+
+export function getAuthToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+export function setAuthToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearAuthToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+http.interceptors.request.use((config) => {
+  const token = getAuthToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export const authApi = {
+  login: (email: string, password: string) =>
+    http.post<AuthResponse>("/api/auth/login", { email, password }).then((r) => r.data),
+  me: () => http.get<MeResponse>("/api/auth/me").then((r) => r.data),
+  logout: () => clearAuthToken(),
+};
 
 // ==================== 知识库 ====================
 export const kbApi = {
@@ -79,7 +110,10 @@ export async function streamChat(
 ): Promise<void> {
   const resp = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+    },
     body: JSON.stringify({ ...body, stream: true }),
     signal,
   });

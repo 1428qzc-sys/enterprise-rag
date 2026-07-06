@@ -85,10 +85,11 @@ docker compose down
 ## 3. 导入知识库
 
 1. 浏览器打开 http://localhost:8080
-2. 进入 **知识库管理** → **新建知识库**（填写名称与描述）
-3. 进入 **文档管理** → **上传文件**，支持 PDF / Word / Excel / Markdown / TXT 等
-4. 或粘贴 **网页 URL** 抓取入库
-5. 等待文档状态变为 **已就绪**（后台自动解析 → 分块 → 向量化）
+2. 使用 `.env` 中的 `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` 登录
+3. 进入 **知识库管理** → **新建知识库**（填写名称与描述）
+4. 进入 **文档管理** → **上传文件**，支持 PDF / Word / Excel / Markdown / TXT 等
+5. 或粘贴 **网页 URL** 抓取入库
+6. 等待文档状态变为 **已就绪**（后台自动解析 → 分块 → 向量化）
 
 项目自带示例文档，可直接上传 `sample-docs/` 目录下的文件：
 
@@ -112,25 +113,36 @@ docker compose down
 # 健康检查
 curl http://localhost:8000/api/health
 
+# 登录并保存 token（Windows PowerShell 可手动复制 access_token）
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"ChangeMe123!"}'
+
 # 创建知识库
 curl -X POST http://localhost:8000/api/knowledge-bases \
+  -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"name":"演示库","description":"测试"}'
 
 # 上传文档（将 <KB_ID> 替换为实际 ID）
 curl -X POST http://localhost:8000/api/knowledge-bases/<KB_ID>/documents/upload \
+  -H "Authorization: Bearer <TOKEN>" \
   -F "file=@sample-docs/公司简介.txt"
 
 # 检索预览（不走 LLM，调试用）
 curl -X POST http://localhost:8000/api/retrieve \
+  -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"kb_id":"<KB_ID>","query":"年假有多少天"}'
 
 # 非流式问答
 curl -X POST http://localhost:8000/api/chat \
+  -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"kb_id":"<KB_ID>","question":"年假有多少天？","stream":false}'
 ```
+
+除 `/api/health` 与 `/api/auth/login` 外，业务接口都需要 Bearer token。
 
 ## 6. 本地开发（零外部依赖）
 
@@ -188,3 +200,11 @@ python -m pytest
 ## 10. 版本信息
 
 当前版本见项目根目录 [`VERSION`](../VERSION)，变更记录见 [`CHANGELOG.md`](../CHANGELOG.md)。
+
+## 11. 生产化文档
+
+- [部署指南](../DEPLOYMENT.md)
+- [运行手册](../RUNBOOK.md)
+- [多租户与权限模型](../MULTI_TENANCY.md)
+- [安全审计记录](../SECURITY_AUDIT.md)
+- [性能报告](../PERFORMANCE_REPORT.md)
