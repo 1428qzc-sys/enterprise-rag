@@ -12,11 +12,13 @@ from fastapi import (
     Depends,
     File,
     HTTPException,
+    Request,
     UploadFile,
 )
 from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 
+from ..audit import record_audit
 from ..config import settings
 from ..core.vector_store import collection_name, get_vector_store
 from ..database import get_session
@@ -26,6 +28,7 @@ from ..security import Principal
 from ..services import bm25_index
 from ..services.ingestion import process_document
 from ..services.parsing import SUPPORTED_EXTS
+from ..security_network import UnsafeUrlError, validate_public_http_url
 from .deps import can_access_kb, require_permission
 
 router = APIRouter(prefix="/knowledge-bases/{kb_id}/documents", tags=["documents"])
@@ -42,6 +45,7 @@ def _require_kb(kb_id: str, session: Session, principal: Principal) -> Knowledge
 async def upload_document(
     kb_id: str,
     background: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
     principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
@@ -82,6 +86,15 @@ async def upload_document(
     session.refresh(doc)
 
     background.add_task(process_document, doc.id)
+    record_audit(
+        "doc.upload",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="document",
+        resource_id=doc.id,
+        detail={"kb_id": kb_id, "filename": filename, "size_bytes": len(content)},
+    )
     return DocumentRead.model_validate(doc)
 
 
@@ -90,13 +103,25 @@ def ingest_url(
     kb_id: str,
     body: IngestUrlRequest,
     background: BackgroundTasks,
+    request: Request,
     principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
     _require_kb(kb_id, session, principal)
     url = body.url.strip()
-    if not (url.startswith("http://") or url.startswith("https://")):
-        raise HTTPException(status_code=400, detail="URL 需以 http:// 或 https:// 开头")
+    try:
+        url = validate_public_http_url(url)
+    except UnsafeUrlError as exc:
+        record_audit(
+            "doc.ingest_url",
+            "denied",
+            request=request,
+            principal=principal,
+            resource_type="knowledge_base",
+            resource_id=kb_id,
+            detail={"reason": str(exc)},
+        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     doc = Document(
         tenant_id=principal.tenant_id,
@@ -113,6 +138,15 @@ def ingest_url(
     session.refresh(doc)
 
     background.add_task(process_document, doc.id)
+    record_audit(
+        "doc.ingest_url",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="document",
+        resource_id=doc.id,
+        detail={"kb_id": kb_id},
+    )
     return DocumentRead.model_validate(doc)
 
 
@@ -147,6 +181,7 @@ def get_document(
 def delete_document(
     kb_id: str,
     document_id: str,
+    request: Request,
     principal: Principal = Depends(require_permission("doc:delete")),
     session: Session = Depends(get_session),
 ) -> None:
@@ -169,6 +204,15 @@ def delete_document(
         except OSError:
             pass
     bm25_index.invalidate(kb_id)
+    record_audit(
+        "doc.delete",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="document",
+        resource_id=document_id,
+        detail={"kb_id": kb_id},
+    )
 
 
 @router.post("/{document_id}/reembed", response_model=DocumentRead)
@@ -176,6 +220,7 @@ def reembed_document(
     kb_id: str,
     document_id: str,
     background: BackgroundTasks,
+    request: Request,
     principal: Principal = Depends(require_permission("doc:write")),
     session: Session = Depends(get_session),
 ) -> DocumentRead:
@@ -194,4 +239,13 @@ def reembed_document(
     session.refresh(doc)
 
     background.add_task(process_document, doc.id)
+    record_audit(
+        "doc.reembed",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="document",
+        resource_id=document_id,
+        detail={"kb_id": kb_id},
+    )
     return DocumentRead.model_validate(doc)

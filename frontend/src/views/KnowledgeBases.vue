@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { kbApi } from "@/api/client";
 import { useKbStore } from "@/stores/kb";
@@ -45,21 +45,54 @@ async function remove(id: string, kbName: string, ev: Event) {
 function fmt(d: string) {
   return new Date(d).toLocaleString("zh-CN", { hour12: false });
 }
+
+const stats = computed(() => {
+  const list = store.kbs;
+  return {
+    kbCount: list.length,
+    docCount: list.reduce((n, k) => n + (k.document_count || 0), 0),
+    chunkCount: list.reduce((n, k) => n + (k.chunk_count || 0), 0),
+  };
+});
 </script>
 
 <template>
   <div>
     <div class="page-head">
       <div>
-        <h1>知识库</h1>
+        <h1>工作台</h1>
         <p>创建并管理相互隔离的知识库，导入文档后即可进行检索增强问答。</p>
       </div>
-      <button class="btn primary" @click="showModal = true">+ 新建知识库</button>
+      <button class="btn primary" :disabled="store.loading" @click="showModal = true">
+        + 新建知识库
+      </button>
     </div>
 
-    <div v-if="store.loading" class="empty"><span class="spin"></span> 加载中…</div>
+    <div v-if="store.error" class="state-banner error">
+      {{ store.error }}
+      <button class="btn sm" style="margin-left: auto" @click="store.refresh()">重试</button>
+    </div>
 
-    <div v-else-if="store.kbs.length === 0" class="empty">
+    <div v-if="!store.loading && store.kbs.length" class="dashboard-stats">
+      <div class="card stat-card">
+        <span class="label">知识库</span>
+        <span class="value">{{ stats.kbCount }}</span>
+      </div>
+      <div class="card stat-card">
+        <span class="label">文档总数</span>
+        <span class="value">{{ stats.docCount }}</span>
+      </div>
+      <div class="card stat-card">
+        <span class="label">向量片段</span>
+        <span class="value">{{ stats.chunkCount }}</span>
+      </div>
+    </div>
+
+    <div v-if="store.loading" class="skeleton-grid" aria-busy="true">
+      <div v-for="n in 3" :key="n" class="skeleton-card"></div>
+    </div>
+
+    <div v-else-if="store.kbs.length === 0 && !store.error" class="empty card" style="padding: var(--space-8)">
       <div class="big">📚</div>
       <p>还没有知识库，点击右上角「新建知识库」开始吧。</p>
     </div>

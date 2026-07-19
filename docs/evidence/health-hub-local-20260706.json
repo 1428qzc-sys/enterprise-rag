@@ -1,0 +1,1 @@
+﻿{"status":"ok","app":"Enterprise RAG","version":"0.1.0","environment":"development","vector_backend":"qdrant","embedding_provider":"fake","embedding_model":"fake","llm_provider":"echo","llm_model":"echo","rerank_enabled":false}

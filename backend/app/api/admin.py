@@ -8,12 +8,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 
+from ..audit import record_audit
 from ..database import get_session
-from ..models import User, UserRole
-from ..schemas import AdminUserCreate, UserRead
+from ..models import AuditLog, User, UserRole
+from ..schemas import AdminUserCreate, AuditLogRead, UserRead
 from ..security import (
     ADMIN_ROLE,
     DEFAULT_PERMISSIONS,
@@ -63,6 +64,7 @@ def list_users(
 @router.post("/users", response_model=UserRead, status_code=201)
 def create_user(
     body: AdminUserCreate,
+    request: Request,
     principal: Principal = Depends(require_permission("admin:manage")),
     session: Session = Depends(get_session),
 ) -> UserRead:
@@ -89,4 +91,27 @@ def create_user(
         role = _ensure_role(session, principal.tenant_id, MEMBER_ROLE, MEMBER_PERMISSIONS)
     session.add(UserRole(user_id=user.id, role_id=role.id))
     session.commit()
+    record_audit(
+        "admin.user_create",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="user",
+        resource_id=user.id,
+        detail={"email": email, "is_superuser": body.is_superuser},
+    )
     return _user_read(session, user)
+
+
+@router.get("/audit-logs", response_model=List[AuditLogRead])
+def list_audit_logs(
+    principal: Principal = Depends(require_permission("admin:manage")),
+    session: Session = Depends(get_session),
+) -> List[AuditLogRead]:
+    rows = session.exec(
+        select(AuditLog)
+        .where(AuditLog.tenant_id == principal.tenant_id)
+        .order_by(AuditLog.created_at.desc())
+        .limit(200)
+    ).all()
+    return [AuditLogRead.model_validate(row) for row in rows]

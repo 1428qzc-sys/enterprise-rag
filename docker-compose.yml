@@ -34,9 +34,15 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: postgresql+psycopg://rag:ragpwd@postgres:5432/enterprise_rag
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-40}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
       VECTOR_BACKEND: ${VECTOR_BACKEND:-qdrant}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       CORS_ORIGINS: "*"
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-60}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-600}
+      WORKER_THREAD_TOKENS: ${WORKER_THREAD_TOKENS:-100}
       AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-dev-change-me-enterprise-rag}
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
       BOOTSTRAP_TENANT_NAME: ${BOOTSTRAP_TENANT_NAME:-Demo Enterprise}
@@ -55,6 +61,9 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       RERANK_ENABLED: ${RERANK_ENABLED:-false}
+      URL_FETCH_TIMEOUT_SECONDS: ${URL_FETCH_TIMEOUT_SECONDS:-10}
+      URL_FETCH_MAX_REDIRECTS: ${URL_FETCH_MAX_REDIRECTS:-3}
+      URL_FETCH_MAX_MB: ${URL_FETCH_MAX_MB:-5}
     volumes:
       - ragdata:/app/data
     ports:

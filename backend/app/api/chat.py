@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete as sa_delete
 from sqlmodel import Session, select
 from sse_starlette.sse import EventSourceResponse
 
+from ..audit import record_audit
 from ..database import get_session
 from ..models import Conversation, KnowledgeBase, Message
 from ..schemas import (
@@ -39,12 +40,22 @@ def _require_kb(kb_id: str, session: Session, principal: Principal) -> Knowledge
 @router.post("/chat")
 async def chat(
     body: ChatRequest,
+    request: Request,
     principal: Principal = Depends(require_permission("chat:use")),
     session: Session = Depends(get_session),
 ):
     kb = _require_kb(body.kb_id, session, principal)
 
     if body.stream:
+        record_audit(
+            "chat.ask",
+            "accepted",
+            request=request,
+            principal=principal,
+            resource_type="knowledge_base",
+            resource_id=kb.id,
+            detail={"stream": True, "top_k": body.top_k},
+        )
 
         async def event_gen():
             async for ev in run_rag_stream(
@@ -69,12 +80,22 @@ async def chat(
         principal.tenant_id,
         principal.user_id,
     )
+    record_audit(
+        "chat.ask",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="knowledge_base",
+        resource_id=kb.id,
+        detail={"stream": False, "top_k": body.top_k},
+    )
     return ChatResponse(**result)
 
 
 @router.post("/retrieve", response_model=RetrieveResponse)
 def retrieve_preview(
     body: RetrieveRequest,
+    request: Request,
     principal: Principal = Depends(require_permission("chat:use")),
     session: Session = Depends(get_session),
 ) -> RetrieveResponse:
@@ -93,6 +114,15 @@ def retrieve_preview(
         )
         for i, c in enumerate(chunks)
     ]
+    record_audit(
+        "chat.retrieve",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="knowledge_base",
+        resource_id=kb.id,
+        detail={"top_k": body.top_k, "result_count": len(results)},
+    )
     return RetrieveResponse(query=body.query, results=results)
 
 
@@ -128,6 +158,7 @@ def list_messages(
 @router.delete("/conversations/{conversation_id}", status_code=204)
 def delete_conversation(
     conversation_id: str,
+    request: Request,
     principal: Principal = Depends(require_permission("conversation:delete")),
     session: Session = Depends(get_session),
 ) -> None:
@@ -138,3 +169,11 @@ def delete_conversation(
     session.execute(sa_delete(Message).where(Message.conversation_id == conversation_id))
     session.delete(conv)
     session.commit()
+    record_audit(
+        "conversation.delete",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="conversation",
+        resource_id=conversation_id,
+    )

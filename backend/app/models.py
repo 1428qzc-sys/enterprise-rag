@@ -1,7 +1,7 @@
 """数据库模型（SQLModel）。
 
 实体关系：
-    Tenant 1..* User / KnowledgeBase / Document / Chunk / Conversation
+    Tenant 1..* User / KnowledgeBase / Document / Chunk / Conversation / AuditLog
     User *..* Role *..* Permission
     KnowledgeBase 1..* Document 1..* Chunk
     KnowledgeBase 1..* Conversation 1..* Message
@@ -171,3 +171,19 @@ class Message(SQLModel, table=True):
     # assistant 消息的引用来源快照（List[SourceChunk]）
     sources: List[Dict[str, Any]] = Field(default_factory=list, sa_type=JSON)
     created_at: datetime = Field(default_factory=_now)
+
+
+class AuditLog(SQLModel, table=True):
+    __tablename__ = "audit_log"
+
+    id: str = Field(default_factory=_uuid, primary_key=True)
+    tenant_id: str = Field(default="", index=True)
+    user_id: str = Field(default="", index=True)
+    action: str = Field(index=True)
+    resource_type: str = Field(default="", index=True)
+    resource_id: str = Field(default="", index=True)
+    outcome: str = Field(default="success", index=True)
+    ip_address: str = Field(default="")
+    user_agent: str = Field(default="")
+    detail: Dict[str, Any] = Field(default_factory=dict, sa_type=JSON)
+    created_at: datetime = Field(default_factory=_now, index=True)

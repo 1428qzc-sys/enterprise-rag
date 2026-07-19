@@ -5,11 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import func
 from sqlmodel import Session, select
 
+from ..audit import record_audit
 from ..config import settings
 from ..core.vector_store import collection_name, get_vector_store
 from ..database import get_session
@@ -48,6 +49,7 @@ def _to_read(session: Session, kb: KnowledgeBase) -> KBRead:
 @router.post("", response_model=KBRead, status_code=201)
 def create_kb(
     body: KBCreate,
+    request: Request,
     principal: Principal = Depends(require_permission("kb:write")),
     session: Session = Depends(get_session),
 ) -> KBRead:
@@ -64,6 +66,15 @@ def create_kb(
     session.add(kb)
     session.commit()
     session.refresh(kb)
+    record_audit(
+        "kb.create",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="knowledge_base",
+        resource_id=kb.id,
+        detail={"name": kb.name},
+    )
     return _to_read(session, kb)
 
 
@@ -72,11 +83,46 @@ def list_kbs(
     principal: Principal = Depends(require_permission("kb:read")),
     session: Session = Depends(get_session),
 ) -> List[KBRead]:
-    query = select(KnowledgeBase).order_by(KnowledgeBase.created_at.desc())
+    doc_counts = (
+        select(Document.kb_id, func.count(Document.id).label("document_count"))
+        .group_by(Document.kb_id)
+        .subquery()
+    )
+    chunk_counts = (
+        select(Chunk.kb_id, func.count(Chunk.id).label("chunk_count"))
+        .group_by(Chunk.kb_id)
+        .subquery()
+    )
+    query = (
+        select(
+            KnowledgeBase,
+            func.coalesce(doc_counts.c.document_count, 0),
+            func.coalesce(chunk_counts.c.chunk_count, 0),
+        )
+        .outerjoin(doc_counts, doc_counts.c.kb_id == KnowledgeBase.id)
+        .outerjoin(chunk_counts, chunk_counts.c.kb_id == KnowledgeBase.id)
+        .order_by(KnowledgeBase.created_at.desc())
+    )
     if not principal.user.is_superuser:
         query = query.where(KnowledgeBase.tenant_id == principal.tenant_id)
-    kbs = session.exec(query).all()
-    return [_to_read(session, kb) for kb in kbs]
+    rows = session.exec(query).all()
+    return [
+        KBRead(
+            id=kb.id,
+            tenant_id=kb.tenant_id,
+            name=kb.name,
+            description=kb.description,
+            embedding_provider=kb.embedding_provider,
+            embedding_model=kb.embedding_model,
+            embedding_dim=kb.embedding_dim,
+            vector_backend=kb.vector_backend,
+            document_count=int(document_count),
+            chunk_count=int(chunk_count),
+            created_at=kb.created_at,
+            updated_at=kb.updated_at,
+        )
+        for kb, document_count, chunk_count in rows
+    ]
 
 
 @router.get("/{kb_id}", response_model=KBRead)
@@ -95,6 +141,7 @@ def get_kb(
 def update_kb(
     kb_id: str,
     body: KBUpdate,
+    request: Request,
     principal: Principal = Depends(require_permission("kb:write")),
     session: Session = Depends(get_session),
 ) -> KBRead:
@@ -109,12 +156,22 @@ def update_kb(
     session.add(kb)
     session.commit()
     session.refresh(kb)
+    record_audit(
+        "kb.update",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="knowledge_base",
+        resource_id=kb.id,
+        detail={"name": kb.name},
+    )
     return _to_read(session, kb)
 
 
 @router.delete("/{kb_id}", status_code=204)
 def delete_kb(
     kb_id: str,
+    request: Request,
     principal: Principal = Depends(require_permission("kb:delete")),
     session: Session = Depends(get_session),
 ) -> None:
@@ -138,3 +195,11 @@ def delete_kb(
     except Exception:
         pass
     bm25_index.invalidate(kb_id)
+    record_audit(
+        "kb.delete",
+        "success",
+        request=request,
+        principal=principal,
+        resource_type="knowledge_base",
+        resource_id=kb_id,
+    )

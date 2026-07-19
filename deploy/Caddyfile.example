@@ -1,0 +1,32 @@
+# Example Caddy v2 reverse proxy for Enterprise RAG (HTTPS termination at edge)
+# Replace rag.example.com with your public domain; ensure DNS A/AAAA points to this host.
+
+rag.example.com {
+	encode gzip
+
+	# TLS: Caddy obtains & renews Let's Encrypt certs automatically when ports 80/443 are reachable.
+
+	client_max_body_size 50MB
+
+	handle /api/* {
+		reverse_proxy backend:8000 {
+			flush_interval -1
+			transport http {
+				read_timeout 3600s
+			}
+			header_up X-Forwarded-Proto {scheme}
+			header_up X-Forwarded-Host {host}
+		}
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+}
+
+# Local smoke without public DNS (self-signed, dev only):
+# :8443 {
+# 	tls internal
+# 	reverse_proxy /api/* backend:8000
+# 	reverse_proxy frontend:80
+# }

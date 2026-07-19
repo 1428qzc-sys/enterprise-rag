@@ -16,6 +16,8 @@ const docs = ref<DocumentItem[]>([]);
 const dragging = ref(false);
 const url = ref("");
 const busy = ref(false);
+const loading = ref(true);
+const loadError = ref("");
 const fileInput = ref<HTMLInputElement | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -27,7 +29,18 @@ const statusLabel: Record<string, string> = {
 };
 
 async function load() {
-  docs.value = await docApi.list(kbId);
+  loadError.value = "";
+  try {
+    docs.value = await docApi.list(kbId);
+  } catch (e: unknown) {
+    const detail =
+      (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+      "文档列表加载失败";
+    loadError.value = String(detail);
+    return;
+  } finally {
+    loading.value = false;
+  }
   const processing = docs.value.some((d) => d.status === "pending" || d.status === "processing");
   if (processing && !timer) {
     timer = setInterval(load, 2500);
@@ -98,6 +111,15 @@ function fmtSize(n: number) {
 }
 
 const hasDocs = computed(() => docs.value.length > 0);
+const expandedDocId = ref<string | null>(null);
+
+function toggleDocDetail(docId: string) {
+  expandedDocId.value = expandedDocId.value === docId ? null : docId;
+}
+
+function fmtTime(d: string) {
+  return new Date(d).toLocaleString("zh-CN", { hour12: false });
+}
 
 onMounted(load);
 onUnmounted(() => timer && clearInterval(timer));
@@ -107,7 +129,12 @@ onUnmounted(() => timer && clearInterval(timer));
   <div>
     <KbTabs :kb-id="kbId" active="documents" />
 
-    <div class="row" style="gap: 16px; align-items: stretch; margin-bottom: 18px">
+    <div v-if="loadError" class="state-banner error">
+      {{ loadError }}
+      <button class="btn sm" style="margin-left: auto" @click="load()">重试</button>
+    </div>
+
+    <div class="row" style="gap: var(--space-4); align-items: stretch; margin-bottom: var(--space-5)">
       <div
         class="dropzone"
         :class="{ drag: dragging }"
@@ -139,12 +166,14 @@ onUnmounted(() => timer && clearInterval(timer));
       </div>
     </div>
 
-    <div class="card">
-      <div v-if="!hasDocs" class="empty">
+    <div class="card" style="position: relative">
+      <div v-if="loading" class="state-banner loading"><span class="spin"></span> 加载文档…</div>
+      <div v-else-if="!hasDocs" class="empty">
         <div class="big">📄</div>
         <p>还没有文档，上传或抓取后会自动解析、分块并向量化。</p>
       </div>
-      <table v-else class="table">
+      <div v-else class="table-wrap">
+      <table class="table">
         <thead>
           <tr>
             <th>文档</th>
@@ -156,27 +185,60 @@ onUnmounted(() => timer && clearInterval(timer));
           </tr>
         </thead>
         <tbody>
-          <tr v-for="doc in docs" :key="doc.id">
-            <td>
-              <div style="font-weight: 500; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
-                {{ doc.name }}
-              </div>
-            </td>
-            <td class="muted">{{ doc.source_type === "url" ? "网页" : "文件" }}</td>
-            <td class="muted">{{ fmtSize(doc.size_bytes) }}</td>
-            <td>{{ doc.chunk_count }}</td>
-            <td>
-              <span class="badge" :class="doc.status" :title="doc.error">
-                {{ statusLabel[doc.status] }}
-              </span>
-            </td>
-            <td style="text-align: right; white-space: nowrap">
-              <button class="btn sm ghost" title="重新嵌入" @click="reembed(doc)">↻</button>
-              <button class="btn sm ghost" title="删除" @click="remove(doc)">🗑</button>
-            </td>
-          </tr>
+          <template v-for="doc in docs" :key="doc.id">
+            <tr
+              class="doc-row-expandable"
+              :class="{ 'is-expanded': expandedDocId === doc.id }"
+              @click="toggleDocDetail(doc.id)"
+            >
+              <td>
+                <div style="font-weight: 500; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">
+                  {{ doc.name }}
+                </div>
+              </td>
+              <td class="muted">{{ doc.source_type === "url" ? "网页" : "文件" }}</td>
+              <td class="muted">{{ fmtSize(doc.size_bytes) }}</td>
+              <td>{{ doc.chunk_count }}</td>
+              <td>
+                <span class="badge" :class="doc.status" :title="doc.error">
+                  {{ statusLabel[doc.status] }}
+                </span>
+              </td>
+              <td style="text-align: right; white-space: nowrap" @click.stop>
+                <button class="btn sm ghost" title="重新嵌入" @click="reembed(doc)">↻</button>
+                <button class="btn sm ghost" title="删除" @click="remove(doc)">🗑</button>
+              </td>
+            </tr>
+            <tr v-if="expandedDocId === doc.id">
+              <td colspan="6" class="doc-detail-panel">
+                <dl class="doc-detail-grid">
+                  <div>
+                    <dt>来源</dt>
+                    <dd>{{ doc.source || doc.name }}</dd>
+                  </div>
+                  <div>
+                    <dt>MIME</dt>
+                    <dd>{{ doc.mime || "—" }}</dd>
+                  </div>
+                  <div>
+                    <dt>入库时间</dt>
+                    <dd>{{ fmtTime(doc.created_at) }}</dd>
+                  </div>
+                  <div>
+                    <dt>更新时间</dt>
+                    <dd>{{ fmtTime(doc.updated_at) }}</dd>
+                  </div>
+                  <div v-if="doc.error">
+                    <dt>错误信息</dt>
+                    <dd style="color: var(--danger)">{{ doc.error }}</dd>
+                  </div>
+                </dl>
+              </td>
+            </tr>
+          </template>
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 </template>

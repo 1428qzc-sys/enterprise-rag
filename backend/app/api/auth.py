@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlmodel import Session, select
 
+from ..audit import record_audit
 from ..database import get_session
 from ..models import Tenant, User
 from ..schemas import LoginRequest, MeResponse, TenantRead, TokenResponse, UserRead
@@ -31,10 +32,22 @@ def _to_tenant_read(tenant: Tenant) -> TenantRead:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
+def login(
+    body: LoginRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> TokenResponse:
     email = body.email.lower().strip()
     user = session.exec(select(User).where(User.email == email)).first()
     if user is None or not user.is_active or not verify_password(body.password, user.password_hash):
+        record_audit(
+            "auth.login",
+            "failure",
+            request=request,
+            tenant_id=user.tenant_id if user else "",
+            user_id=user.id if user else "",
+            detail={"email": email},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="邮箱或密码错误",
@@ -42,6 +55,14 @@ def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenR
         )
     tenant = session.get(Tenant, user.tenant_id)
     if tenant is None or not tenant.is_active:
+        record_audit(
+            "auth.login",
+            "denied",
+            request=request,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            detail={"reason": "tenant_inactive", "email": email},
+        )
         raise HTTPException(status_code=403, detail="租户不存在或已停用")
 
     # 登录响应里的权限用于前端展示；Token 本身只保存主体身份，权限每次由数据库计算。
@@ -52,6 +73,7 @@ def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenR
         tenant=tenant,
         permissions=permissions_for_user(session, user),
     )
+    record_audit("auth.login", "success", request=request, principal=principal, detail={"email": email})
     return TokenResponse(
         access_token=create_access_token(user),
         user=_to_user_read(principal),

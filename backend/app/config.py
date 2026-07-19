@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # 逗号分隔的允许来源；"*" 表示放开（开发用）
     cors_origins: str = "*"
 
+    # ---------------- 服务安全基线 ----------------
+    request_timeout_seconds: float = 60.0
+    rate_limit_requests_per_minute: int = 600
+    worker_thread_tokens: int = 100
+
     # ---------------- 认证 / 多租户 ----------------
     # 生产环境必须覆盖为高熵随机值；默认值仅用于本地 smoke 与测试。
     auth_secret_key: str = "dev-change-me-enterprise-rag"
@@ -39,6 +44,9 @@ class Settings(BaseSettings):
     # ---------------- 数据库 ----------------
     # 本地零配置默认 SQLite；docker-compose 中注入 PostgreSQL DSN
     database_url: str = "sqlite:///./data/enterprise_rag.db"
+    db_pool_size: int = 20
+    db_max_overflow: int = 40
+    db_pool_timeout_seconds: float = 30.0
 
     # ---------------- 向量库 ----------------
     # memory：进程内 numpy 余弦，零依赖便于本地/测试；qdrant：生产
@@ -93,6 +101,11 @@ class Settings(BaseSettings):
     # ---------------- 上传 ----------------
     upload_dir: str = "./data/uploads"
     max_upload_mb: int = 50
+
+    # ---------------- 外部 URL 抓取防护 ----------------
+    url_fetch_timeout_seconds: float = 10.0
+    url_fetch_max_redirects: int = 3
+    url_fetch_max_mb: int = 5
 
     @property
     def cors_origin_list(self) -> List[str]:

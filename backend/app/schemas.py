@@ -50,6 +50,22 @@ class AdminUserCreate(BaseModel):
     is_superuser: bool = False
 
 
+class AuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    tenant_id: str
+    user_id: str
+    action: str
+    resource_type: str
+    resource_id: str
+    outcome: str
+    ip_address: str
+    user_agent: str
+    detail: dict
+    created_at: datetime
+
+
 class KBCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=128)
     description: str = ""

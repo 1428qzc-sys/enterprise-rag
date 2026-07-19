@@ -10,7 +10,8 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-import httpx
+from ..config import settings
+from ..security_network import fetch_public_url
 
 
 @dataclass
@@ -135,11 +136,14 @@ def parse_file(path: str, filename: Optional[str] = None) -> List[Section]:
 
 def parse_url(url: str, timeout: float = 30.0) -> tuple[List[Section], str]:
     """抓取网页并抽取正文。返回 (sections, 页面标题)。"""
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; EnterpriseRAG/1.0)"}
-    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        html = resp.text
+    del timeout  # 使用集中配置，避免调用方绕过安全基线。
+    fetched = fetch_public_url(
+        url,
+        timeout=settings.url_fetch_timeout_seconds,
+        max_bytes=settings.url_fetch_max_mb * 1024 * 1024,
+        max_redirects=settings.url_fetch_max_redirects,
+    )
+    html = fetched.text
     text, title = _parse_html_text(html)
     title = title or url
     sections = [Section(text=text, title=title)] if text.strip() else []

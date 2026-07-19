@@ -91,6 +91,8 @@ docker compose down
 5. 或粘贴 **网页 URL** 抓取入库
 6. 等待文档状态变为 **已就绪**（后台自动解析 → 分块 → 向量化）
 
+网页 URL 会先经过 SSRF 防护校验：localhost、内网 IP、链路本地地址、metadata endpoint 以及重定向后的非公网目标都会被拒绝。
+
 项目自带示例文档，可直接上传 `sample-docs/` 目录下的文件：
 
 - `员工手册.md`
@@ -140,6 +142,10 @@ curl -X POST http://localhost:8000/api/chat \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"kb_id":"<KB_ID>","question":"年假有多少天？","stream":false}'
+
+# 查看审计日志
+curl http://localhost:8000/api/admin/audit-logs \
+  -H "Authorization: Bearer <TOKEN>"
 ```
 
 除 `/api/health` 与 `/api/auth/login` 外，业务接口都需要 Bearer token。
@@ -184,13 +190,14 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-覆盖分块、RRF 融合、中文分词，以及建库 → 上传 → 入库 → 检索 → 问答端到端链路。
+覆盖分块、RRF 融合、中文分词、认证、多租户越权、SSRF 拒绝、安全响应头，以及建库 → 上传 → 入库 → 检索 → 问答端到端链路。
 
 ## 9. 常见问题
 
 | 现象 | 处理 |
 | --- | --- |
 | 文档一直「处理中」 | `docker compose logs backend` 查看解析/嵌入错误；确认 Embedding API Key 有效 |
+| URL 入库返回 400 | 确认目标不是 localhost、内网、metadata endpoint，且所有重定向目标均是公网 HTTP/HTTPS |
 | 问答无引用或答非所问 | 确认文档状态为「已就绪」；检查是否选对了知识库 |
 | 更换 Embedding 模型后检索异常 | 对文档执行「重嵌入」，或删除后重新上传 |
 | Qdrant 连接失败 | `docker compose ps` 确认 qdrant 容器 running；检查 `QDRANT_URL` |

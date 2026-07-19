@@ -17,6 +17,7 @@
 - `document.tenant_id`
 - `chunk.tenant_id`
 - `conversation.tenant_id`
+- `audit_log.tenant_id`
 
 所有业务数据必须绑定租户。旧演示数据会在启动时回填到 bootstrap 默认租户。
 
@@ -54,8 +55,14 @@
 - 第二租户用户不能对第一租户知识库执行检索。
 - 第二租户知识库列表不包含第一租户对象。
 
+`backend/tests/test_security_hardening.py` 已覆盖：
+
+- SSRF 私网/localhost/metadata URL 拒绝。
+- URL 抓取拒绝事件写入租户审计日志。
+- 安全响应头返回。
+
 ## 当前边界
 
-- 当前版本提供租户内用户创建和用户列表；角色编辑 UI 尚未实现。
+- 当前版本提供租户内用户创建、用户列表和审计日志查询；角色编辑 UI 尚未实现。
 - 超级管理员可跨租户查看业务数据，用于平台运维；普通租户用户不能跨租户。
-- 正式生产迁移建议引入 Alembic 替代当前兼容迁移函数。
+- 已引入 Alembic 基线迁移；当前兼容迁移函数仅用于不删除旧本地 Docker volume 的平滑兜底。

@@ -1,0 +1,10 @@
+{
+  "status": "ok",
+  "app": "Enterprise RAG",
+  "version": "0.1.0",
+  "environment": "development",
+  "vector_backend": "qdrant",
+  "embedding_provider": "fake",
+  "llm_provider": "echo",
+  "_comment": "示例占位 — 替换为 staging/production curl 输出后归档为 health-<env>-<date>.json"
+}

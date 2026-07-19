@@ -4,9 +4,12 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+.coverage
+backend/.coverage
 *.egg-info/
 
 # ---- 数据与运行产物 ----
+_optimization-screenshots/
 backend/data/
 data/
 *.db

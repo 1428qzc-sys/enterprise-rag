@@ -19,6 +19,11 @@
 | 会话可跨 KB 复用 | 已修复 | `ensure_conversation()` 要求已有会话属于当前知识库 |
 | 前端不带认证头 | 已修复 | Axios 拦截器和 SSE fetch 均发送 Bearer token |
 | 缺少越权测试 | 已修复 | `test_cross_tenant_kb_is_not_visible` |
+| SSRF / 外部 URL 抓取 | 已修复 | `security_network.py` 校验公网地址，限制重定向、大小与超时；`test_security_hardening.py` 覆盖 localhost/私网/metadata |
+| 缺少安全响应头 | 已修复 | `security_middleware.py` 返回 `nosniff`、`DENY`、CSP、Permissions-Policy |
+| 缺少基础限流和超时 | 已修复 | `InMemoryRateLimitMiddleware` 与 `REQUEST_TIMEOUT_SECONDS` |
+| 缺少关键操作审计 | 已修复 | 新增 `audit_log` 表、`record_audit()` 与 `/api/admin/audit-logs` |
+| 缺少正式迁移骨架 | 已修复 | 新增 Alembic 基线 `20260706_0001` |
 
 ## 依赖扫描
 
@@ -61,12 +66,13 @@ git grep -n -I -E "sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|BEGIN (RSA|OPENSSH) PRIVATE K
 
 ## SSRF / 外部 URL 抓取
 
-当前 `/documents/url` 允许抓取 http/https URL。生产前必须增加：
+当前 `/documents/url` 已在创建文档前校验：
 
-- 禁止内网 IP、localhost、metadata endpoint。
-- DNS 解析后校验目标 IP。
-- 限制重定向次数。
-- 限制下载大小与超时。
+- 仅允许 `http://` / `https://`。
+- 禁止 localhost、私网、链路本地、保留地址、IPv6 loopback 和常见 metadata endpoint。
+- DNS 解析后校验所有解析出的 IP。
+- 每次重定向后重新校验目标 URL。
+- 限制 `URL_FETCH_MAX_REDIRECTS`、`URL_FETCH_MAX_MB` 和 `URL_FETCH_TIMEOUT_SECONDS`。
 
 ## AI / RAG 风险
 
@@ -80,6 +86,6 @@ git grep -n -I -E "sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|BEGIN (RSA|OPENSSH) PRIVATE K
 ## 剩余风险
 
 - 尚未完成真实公网生产环境的 HTTPS、WAF、集中日志和告警验证。
-- 尚未完成 100 并发压测。
-- 尚未接入 Alembic 正式迁移。
-- 尚未接入集中式审计日志。
+- 100 并发 k6 压测已在 Docker 本地环境完成（见 [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)）；公网生产链路待复测。
+- 当前审计日志已落库并可查，但尚未接入集中日志/SIEM。
+- 当前限流为单进程内存限流，多副本生产部署应迁移到网关或 Redis 限流。

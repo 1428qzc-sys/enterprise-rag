@@ -14,14 +14,22 @@ from .config import settings
 
 def _make_engine():
     url = settings.database_url
-    connect_args = {}
+    engine_kwargs = {"echo": False, "pool_pre_ping": True}
     if settings.is_sqlite:
         # SQLite 需允许跨线程共享连接，并确保目录存在
-        connect_args = {"check_same_thread": False}
+        engine_kwargs["connect_args"] = {"check_same_thread": False}
         db_path = url.replace("sqlite:///", "").replace("sqlite://", "")
         if db_path and db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(url, echo=False, connect_args=connect_args, pool_pre_ping=True)
+    else:
+        engine_kwargs.update(
+            {
+                "pool_size": settings.db_pool_size,
+                "max_overflow": settings.db_max_overflow,
+                "pool_timeout": settings.db_pool_timeout_seconds,
+            }
+        )
+    return create_engine(url, **engine_kwargs)
 
 
 engine = _make_engine()

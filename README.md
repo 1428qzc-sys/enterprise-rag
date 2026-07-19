@@ -3,7 +3,7 @@
 > 一套生产级的企业知识库检索增强问答（RAG）系统：多格式文档接入、**向量 + BM25 混合检索 + 重排**、**流式问答与引用溯源**、多知识库隔离、可插拔的 Embedding/LLM 提供方，一条 `docker compose` 命令即可拉起全套服务。
 
 <p>
-  <img alt="CI" src="https://github.com/Hou-mingyuan/enterprise-rag/actions/workflows/ci.yml/badge.svg">
+  <a href="https://github.com/Hou-mingyuan/enterprise-rag/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Hou-mingyuan/enterprise-rag/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="python" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white">
   <img alt="fastapi" src="https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white">
   <img alt="vue" src="https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white">
@@ -27,6 +27,19 @@
 - **可插拔提供方**：Embedding 与 LLM 支持 **OpenAI 兼容 / DeepSeek / 本地 Ollama / 本地 BGE**，环境变量切换，密钥走 `.env`。
 - **零依赖本地体验**：内置 `memory` 向量后端 + SQLite + `fake/echo` 提供方，无需任何外部服务或密钥即可跑通与测试。
 - **生产安全基线**：SSRF 防护、审计日志、安全响应头、请求超时、单进程限流、Alembic 正式迁移骨架、pytest 端到端测试、Docker 一键部署、CI、部署/运行/安全/性能文档。
+
+## 💼 面试速览（3 问 3 答）
+
+> 完整版见 [CSDN 长文 §七](docs/csdn/enterprise-rag.md#七面试-3-问-3-答)
+
+**Q1：为什么 RAG 要混合检索，而不是只用向量？**
+向量擅长语义相似，但对 rare token、法规编号、SKU 等精确匹配弱；BM25 补稀疏通道。RRF 融合两路排序，避免分数尺度不一致；可选 BGE 重排再压噪声进 Prompt。
+
+**Q2：如何降低幻觉、让业务方敢用？**
+(1) 检索阈值 + 重排控制 chunk 质量；(2) Prompt 约束「仅依据参考文档」+ 编号引用 `[n]`；(3) SSE 先返回 `sources`，UI 展示原文片段与页码。关键场景仍建议人工复核 + 审计日志。
+
+**Q3：多租户隔离在数据层怎么落地？**
+元数据表带 `tenant_id`，JWT 解析当前租户，所有查询带 tenant 过滤；向量侧按知识库独立 Qdrant collection。越权测试见 [MULTI_TENANCY.md](MULTI_TENANCY.md) 与 pytest 用例。
 
 ## 🏗️ 系统架构
 
@@ -81,6 +94,71 @@ sequenceDiagram
     B-->>F: event: token ... event: done
     F-->>U: 实时渲染答案 + 引用
 ```
+
+文档入库 → 检索 → 问答全链路（与 [CSDN 长文](docs/csdn/enterprise-rag.md) 对齐）：
+
+```mermaid
+sequenceDiagram
+    participant U as 用户/管理员
+    participant F as 前端
+    participant B as FastAPI
+    participant P as PostgreSQL
+    participant Q as Qdrant
+    participant E as Embedding
+    participant L as LLM
+    U->>F: 上传 PDF/URL
+    F->>B: POST /documents/upload 或 /documents/url
+    B->>B: 解析 → 分块(chunk/overlap)
+    B->>E: 批量嵌入向量
+    E-->>B: vectors
+    B->>P: 写入文档元数据与 chunk 文本
+    B->>Q: upsert 向量(collection per KB)
+    B-->>F: 状态「已就绪」
+    U->>F: 智能问答提问
+    F->>B: POST /api/chat?stream=true (SSE)
+    B->>Q: 向量 top-k
+    B->>P: BM25 稀疏召回
+    B->>B: RRF 融合 →(可选)BGE 重排
+    B-->>F: event: sources [1][2]…
+    B->>L: Prompt(编号上下文+会话记忆)
+    L-->>B: stream tokens
+    B-->>F: event: token … event: done
+    F-->>U: 流式答案 + 可点击引用溯源
+```
+
+## 🛡️ 限流策略与 Redis 升级路径
+
+应用层默认启用 **`InMemoryRateLimitMiddleware`**（单进程固定窗口），按客户端 IP 统计每分钟请求数，超限返回 **HTTP 429** + `Retry-After: 60`。配置项：
+
+| 变量 | 说明 | 默认 |
+| --- | --- | --- |
+| `RATE_LIMIT_REQUESTS_PER_MINUTE` | 单 IP 每分钟请求上限 | `600` |
+
+**当前实现（单机 / 演示）**
+
+- 适用：Docker Desktop 单副本、`uvicorn` 本地开发、作品集 smoke。
+- 机制：进程内 `defaultdict` 按 `(client_ip, minute_window)` 计数；窗口滑动时自动清理旧 bucket（见 `backend/app/security_middleware.py`）。
+- 局限：**多 Uvicorn worker 或多 Pod 副本时各实例独立计数**，无法全局共享配额。
+
+**生产推荐：Redis 分布式限流（P2 Roadmap）**
+
+多副本部署时，应将限流上移到以下任一层（优先级从高到低）：
+
+1. **API 网关**（Nginx `limit_req`、Kong、APISIX）— 在入口统一限流，不侵入应用代码。
+2. **Redis 滑动窗口 / 令牌桶** — 各副本共享计数器，键示例 `ratelimit:{tenant_id}:{client_ip}`，Lua 脚本保证原子性。
+3. **应用层 Redis 中间件** — 替换 `InMemoryRateLimitMiddleware`，读取 `REDIS_URL`，失败时降级为本地限流或 fail-open（可配置）。
+
+规划环境变量（尚未在代码中强制要求，供部署参考）：
+
+```bash
+# 分布式限流（Roadmap）
+RATE_LIMIT_BACKEND=redis          # memory | redis
+REDIS_URL=redis://redis:6379/0
+RATE_LIMIT_REQUESTS_PER_MINUTE=600
+RATE_LIMIT_BURST=50               # 可选：令牌桶突发
+```
+
+**运维提示**：429 排查见 [RUNBOOK.md §429](RUNBOOK.md)；安全审计记录见 [SECURITY_AUDIT.md](SECURITY_AUDIT.md)（单进程限流 → Redis/网关为已知剩余风险）。k6 压测 100 VU 场景下，建议在网关层设置 per-tenant 配额，避免单租户打满共享 LLM 配额。
 
 ## 🧰 技术栈
 
@@ -262,10 +340,10 @@ python backend/scripts/evaluate.py --api http://localhost:8000 \
 ```bash
 cd backend
 pip install -r requirements-dev.txt
-python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
+python -m pytest   # 离线：fake embedding + echo LLM + memory 向量库；54 项 · 覆盖率 ≥75%
 ```
 
-覆盖分块、RRF 融合、中文分词、认证、租户隔离与越权防护、SSRF 拒绝、安全响应头，以及「登录→建库→上传→入库→检索→问答→会话」端到端链路。
+覆盖分块、RRF 融合、中文分词、RAG 编排（上下文截断/问题改写/向量降级）、认证、租户隔离与越权防护、SSRF 拒绝、安全响应头，以及「登录→建库→上传→入库→检索→问答→会话」端到端链路。
 
 ## 🖼️ 界面截图
 
@@ -278,7 +356,8 @@ python -m pytest # 离线运行：fake embedding + echo LLM + memory 向量库
 ## 🗺️ Roadmap
 
 - [x] 用户体系、知识库级权限（RBAC）与租户隔离后端基础
-- [x] SSRF 防护、审计日志、安全响应头、请求超时、限流和 Alembic 迁移骨架
+- [x] SSRF 防护、审计日志、安全响应头、请求超时、单进程限流和 Alembic 迁移骨架
+- [ ] Redis 分布式限流中间件（替换 `InMemoryRateLimitMiddleware`，多副本共享配额）
 - [ ] 角色权限管理 UI
 - [ ] 文档版本管理与增量更新
 - [ ] 更多重排策略（ColBERT、LLM-as-reranker）与查询扩展

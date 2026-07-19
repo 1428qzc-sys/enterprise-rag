@@ -18,19 +18,24 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || "http://127.0.0.1:8000";
 const ADMIN_EMAIL = __ENV.ADMIN_EMAIL || "admin@example.com";
 const ADMIN_PASSWORD = __ENV.ADMIN_PASSWORD || "ChangeMe123!";
+const THINK_TIME_SECONDS = Number(__ENV.THINK_TIME_SECONDS || 3);
 
 function login() {
   const res = http.post(
     `${BASE_URL}/api/auth/login`,
     JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-    { headers: { "Content-Type": "application/json" }, tags: { type: "fast" } },
+    { headers: { "Content-Type": "application/json" }, tags: { type: "auth" } },
   );
   check(res, { "login 200": (r) => r.status === 200 });
   return res.json("access_token");
 }
 
-export default function () {
-  const token = login();
+export function setup() {
+  return { token: login() };
+}
+
+export default function (data) {
+  const token = data.token;
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -45,5 +50,5 @@ export default function () {
   });
   check(kbs, { "list kbs 200": (r) => r.status === 200 });
 
-  sleep(1);
+  sleep(THINK_TIME_SECONDS);
 }
