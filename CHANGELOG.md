@@ -1,46 +1,68 @@
 # Changelog
 
-All notable changes to this project are documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes are recorded here. The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+No unreleased product changes recorded after the `1.0.0-rc.1` candidate snapshot.
+
+## [1.0.0-rc.1] - 2026-07-20
+
+Local release candidate only; no package, image, tag or public deployment was published.
+
 ### Added
 
-- 多租户与权限基础：`Tenant` / `User` / `Role` / `Permission` / JWT Bearer 登录。
-- 业务 API 后端权限校验与租户隔离：知识库、文档、检索、问答、会话接口默认需要登录。
-- 租户内用户管理 API：`GET/POST /api/admin/users`。
-- 前端登录页、租户/用户展示、退出入口、Axios 与 SSE Bearer token。
-- GitHub Actions CI：后端测试、前端审计/类型检查/构建、Docker Compose build smoke。
-- 生产化文档：`DEPLOYMENT.md`、`RUNBOOK.md`、`MULTI_TENANCY.md`、`SECURITY_AUDIT.md`、`PERFORMANCE_REPORT.md`。
-- k6 压测脚本：`performance/k6-smoke.js`。
+- Tenant-scoped user, role, permission and audit management in the API and Vue UI.
+- Tenant slug login and deterministic handling of duplicate emails across tenants.
+- Redis Lua rate limiting with memory/Redis backends and explicit fail-open/fail-closed behavior.
+- Persistent document versions, ingestion jobs and knowledge-base reindex jobs with progress, cancel, retry and restart recovery.
+- File/URL version updates, Chunk source inspection, active-version reconciliation and revision collection rebuilds.
+- Vector collection dimension/count contracts and PostgreSQL/Qdrant compensation paths.
+- Vector + BM25 + RRF retrieval diagnostics, deterministic lexical reranking and optional cross-encoder integration.
+- Conservative no-evidence answers, prompt-injection Chunk isolation and server-side citation validation.
+- SSE request IDs, idempotent reconnect, validated final replacement events and Markdown conversation export.
+- Request IDs, redacted JSON logs, live/ready health probes and Prometheus HTTP/retrieval metrics.
+- Fixed 31-case retrieval/RAG evaluation with executable thresholds.
+- Docker release smoke, k6 fixed-fixture performance test and PostgreSQL/Qdrant/uploads recovery drill.
+- Frontend ESLint, Vitest, type checking and responsive admin/document/chat states.
+
+### Changed
+
+- Versioned ingestion now stages new Chunk/vector data and keeps the previous active version on failure.
+- Knowledge-base model/dimension changes build a new collection and switch only after exact-count verification.
+- Uploads stream to disk while enforcing size and SHA-256 instead of buffering the entire file.
+- PDF page metadata now flows from parser through Chunk, retrieval, answer source and UI location.
+- Docker defaults now use PostgreSQL 16, Qdrant 1.18.2, Redis 7.4.9, fake Embedding, echo LLM and lexical reranking on ports `19020-19024`.
+- Backend containers automatically run Alembic before serving; BM25 tokenization warms before readiness.
+- CI now runs backend tests, frontend audit/lint/test/typecheck/build, then starts a clean Compose stack and executes the release chain.
+
+### Fixed
+
+- Removed the superuser cross-tenant authorization bypass.
+- Prevented duplicate-email login from selecting an arbitrary tenant.
+- Prevented false `[1]` citations and answers generated without reliable evidence.
+- Prevented old document versions or failed reindex collections from becoming searchable.
+- Added rollback/recovery for database activation, vector write/delete and collection cleanup failures.
+- Fixed small-corpus BM25 zero-IDF behavior without weakening the independent evidence threshold.
+- Fixed cold first retrieval by moving Jieba initialization into startup readiness.
+- Fixed frontend SSE interruption, retry, offline, reconciliation polling and stale-version citation behavior.
 
 ### Security
 
-- 增加未登录访问拒绝测试与跨租户知识库/检索越权测试。
-- 将 `.env.example` 中容易触发 secret 扫描误报的 `sk-*` 占位符替换为普通占位文本。
+- Added JWT tenant-claim verification and tenant filters across knowledge bases, documents, jobs, versions, chunks, conversations, audit, users and roles.
+- Added private/reserved/metadata URL rejection on every redirect, upload content validation and security headers.
+- Added production startup rejection for demo credentials, SQLite, memory backends, fail-open rate limiting and Mock providers.
+- Added log redaction and request-body/Prompt exclusion.
 
-### Planned
+### Known boundaries
 
-- 文档版本管理与增量更新
-- 导出对话为 Markdown / PDF
+- fake/echo is a Mock engineering path, not real model quality.
+- No OCR for scanned PDF and no PDF conversation export.
+- Ingestion jobs are persistent but execute in the application process; multiple write workers require an external queue/lease design.
+- Public HTTPS, WAF, centralized observability, real provider quality and organization-specific compliance remain deployment-environment checks.
 
 ## [0.1.0] - 2026-07-04
 
 ### Added
 
-- 企业知识库 RAG 问答系统 MVP：Python 3.11 + FastAPI + Vue 3
-- 多格式文档接入：PDF / Word / Excel / Markdown / TXT / CSV / HTML / 网页 URL
-- 混合检索：Qdrant 向量召回 + BM25（jieba）关键词召回 → RRF 融合 → 可选 BGE 交叉编码器重排
-- SSE 流式 RAG 问答，带 `[1][2]` 引用溯源（文档名、页码、原文片段、相关度分数）
-- 多知识库管理（创建 / 隔离 / 删除）与文档管理（列表 / 删除 / 重嵌入）
-- 对话记忆与多轮问题 condense 改写
-- 可插拔 Embedding / LLM 提供方（OpenAI 兼容 / DeepSeek / Ollama / 本地 BGE）
-- 零依赖本地模式：SQLite + memory 向量库 + fake/echo 提供方，pytest 离线可跑
-- `docker-compose.yml` 一键部署（PostgreSQL + Qdrant + backend + frontend）
-- 检索评估脚本 `backend/scripts/evaluate.py`（Hit@k / MRR，可选 RAGAS）
-- pytest 端到端测试（分块 / 检索 / API 全链路）
-- 中文 README、架构文档、`sample-docs/` 示例文档
-- `VERSION`、`CHANGELOG.md`、`docs/USAGE.md` 开源发布配套文档
+- Initial FastAPI/Vue knowledge-base prototype with file ingestion, hybrid retrieval, SSE chat, basic citations, Docker Compose and Alembic baseline.

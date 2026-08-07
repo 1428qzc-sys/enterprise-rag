@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    按 DEPLOYMENT.md §8 采集公网 HTTPS 验收证据到 docs/evidence/
+    采集目标环境 DNS、TLS、health 与登录 smoke 证据到 docs/evidence/
 
 .PARAMETER Domain
     公网域名，如 rag-staging.example.com
@@ -8,11 +8,14 @@
 .PARAMETER AdminEmail
     登录邮箱（默认 admin@example.com）
 
+.PARAMETER TenantSlug
+    登录租户标识（默认 demo）
+
 .PARAMETER AdminPassword
-    登录密码（勿写入日志；默认 ChangeMe123!）
+    登录密码（必填且不会写入输出）
 
 .EXAMPLE
-    .\scripts\collect-https-evidence.ps1 -Domain rag-staging.example.com
+    .\scripts\collect-https-evidence.ps1 -Domain rag-staging.example.com -AdminPassword '<secret>'
 #>
 [CmdletBinding()]
 param(
@@ -21,7 +24,10 @@ param(
 
     [string]$AdminEmail = 'admin@example.com',
 
-    [string]$AdminPassword = 'ChangeMe123!'
+    [string]$TenantSlug = 'demo',
+
+    [Parameter(Mandatory = $true)]
+    [string]$AdminPassword
 )
 
 $ErrorActionPreference = 'Stop'
@@ -54,7 +60,7 @@ Write-Host "[OK] Health -> $healthFile" -ForegroundColor Green
 
 # §8.3 Login (redacted output)
 $loginFile = Join-Path $EvidenceDir "login-smoke-$Domain-$Date.txt"
-$loginBody = @{ email = $AdminEmail; password = $AdminPassword } | ConvertTo-Json -Compress
+$loginBody = @{ tenant_slug = $TenantSlug; email = $AdminEmail; password = $AdminPassword } | ConvertTo-Json -Compress
 try {
     $resp = Invoke-WebRequest -Uri "$Base/api/auth/login" -Method POST -Body $loginBody -ContentType 'application/json' -UseBasicParsing
     $hasToken = ($resp.Content -match 'access_token')
@@ -68,6 +74,6 @@ try {
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Yellow
 Write-Host "  1. Optional SSL Labs screenshot -> docs/evidence/ssl-labs-$Domain-$Date.png"
-Write-Host "  2. Run: python backend/scripts/smoke_auth_flow.py --base-url $Base"
-Write-Host "  3. Copy acceptance-checklist.example.md and fill items 1-12"
-Write-Host "  4. Do NOT commit real tokens to git"
+Write-Host "  2. Run release_smoke.py against the target only in an authorized test tenant"
+Write-Host "  3. Verify SSE, upload limits, metrics access and recovery in that environment"
+Write-Host "  4. Do NOT commit real tokens, credentials or customer data"

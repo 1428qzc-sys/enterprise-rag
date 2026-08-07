@@ -1,0 +1,59 @@
+{
+  "started_at": "2026-07-20T03:30:28.359644+00:00",
+  "base_url": "http://127.0.0.1:19027",
+  "frontend_url": "http://127.0.0.1:19020",
+  "steps": {
+    "readiness": {
+      "database": {
+        "status": "ok",
+        "latency_ms": 0.578
+      },
+      "vector_store": {
+        "status": "ok",
+        "latency_ms": 1.935
+      },
+      "embedding": {
+        "status": "ok",
+        "latency_ms": 0.211
+      },
+      "llm": {
+        "status": "ok",
+        "latency_ms": 0.003
+      },
+      "redis": {
+        "status": "disabled",
+        "backend": "memory",
+        "required": false
+      }
+    },
+    "frontend": 200,
+    "login": 200,
+    "v1": {
+      "version": 1,
+      "chunks": 1,
+      "answer_has_18_days": true,
+      "citation_verified": true
+    },
+    "v2": {
+      "version": 2,
+      "chunks": 1,
+      "answer_has_20_days": true,
+      "old_chunks_returned": false,
+      "citation_verified": true
+    },
+    "reconcile": {
+      "status": "done",
+      "progress": 100
+    },
+    "delete": {
+      "document": 204,
+      "knowledge_base": 204,
+      "post_delete": 404
+    },
+    "metrics": true
+  },
+  "kb_id": "14bea770b4164dfabe0cd97364dfa262",
+  "status": "passed",
+  "duration_seconds": 11.844,
+  "finished_at": "2026-07-20T03:30:40.201835+00:00"
+}

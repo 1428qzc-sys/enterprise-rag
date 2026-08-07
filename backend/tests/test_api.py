@@ -16,7 +16,10 @@ ADMIN_PASSWORD = "ChangeMe123!"
 
 
 def _login(client, email=ADMIN_EMAIL, password=ADMIN_PASSWORD):
-    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    payload = {"email": email, "password": password}
+    if email == ADMIN_EMAIL:
+        payload["tenant_slug"] = "demo"
+    resp = client.post("/api/auth/login", json=payload)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -166,6 +169,61 @@ def test_chat_stream_sse(client):
     assert "event: sources" in body
     assert "event: token" in body
     assert "event: done" in body
+
+
+def test_chat_request_id_replays_without_duplicate_messages(client):
+    from uuid import uuid4
+
+    kb_id = _create_kb(client, "幂等问答库")
+    doc_id = _upload_text(client, kb_id)
+    _wait_done(client, kb_id, doc_id)
+    headers = _auth_headers(client)
+    request_id = uuid4().hex
+    body = {
+        "kb_id": kb_id,
+        "question": "年假有多少天？",
+        "request_id": request_id,
+        "stream": False,
+    }
+
+    first = client.post("/api/chat", json=body, headers=headers)
+    second = client.post("/api/chat", json=body, headers=headers)
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["conversation_id"] == first.json()["conversation_id"]
+    assert second.json()["answer"] == first.json()["answer"]
+    assert second.json()["diagnostics"] == {"cached": True}
+
+    messages = client.get(
+        f"/api/conversations/{first.json()['conversation_id']}/messages",
+        headers=headers,
+    ).json()
+    turn_messages = [message for message in messages if message["request_id"] == request_id]
+    assert [message["role"] for message in turn_messages] == ["user", "assistant"]
+
+    with client.stream(
+        "POST",
+        "/api/chat",
+        json={**body, "conversation_id": first.json()["conversation_id"], "stream": True},
+        headers=headers,
+    ) as response:
+        replay = "".join(response.iter_text())
+    assert response.status_code == 200
+    assert '"cached": true' in replay
+    assert "event: done" in replay
+
+    exported = client.get(
+        f"/api/conversations/{first.json()['conversation_id']}/export.md",
+        headers=headers,
+    )
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/markdown")
+    assert exported.headers["content-disposition"].endswith('.md"')
+    assert "## 用户" in exported.text
+    assert "## 助手" in exported.text
+    assert "### 引用" in exported.text
+    assert "handbook.txt" in exported.text
+    assert "年假" in exported.text
 
 
 def test_cross_tenant_kb_is_not_visible(client):

@@ -36,25 +36,32 @@ engine = _make_engine()
 
 
 def init_db() -> None:
-    """建表并确保数据目录存在。"""
+    """初始化运行目录与引导身份；Docker/生产架构必须先由 Alembic 建立。"""
     # 导入以注册所有表模型
     from . import models  # noqa: F401
     from .security import ensure_bootstrap_identity
 
     os.makedirs(settings.upload_dir, exist_ok=True)
-    SQLModel.metadata.create_all(engine)
-    _run_compat_migrations()
+    if settings.database_auto_create:
+        SQLModel.metadata.create_all(engine)
+        _run_compat_migrations()
+    else:
+        tables = set(inspect(engine).get_table_names())
+        required = {"alembic_version", "tenant", "app_user", "knowledge_base"}
+        missing = sorted(required - tables)
+        if missing:
+            raise RuntimeError(
+                "数据库架构尚未迁移；请先执行 alembic upgrade head。缺少："
+                + ", ".join(missing)
+            )
     with Session(engine) as session:
         ensure_bootstrap_identity(session)
-    _backfill_legacy_tenant_ids()
+    if settings.database_auto_create:
+        _backfill_legacy_tenant_ids()
 
 
 def _run_compat_migrations() -> None:
-    """为早期演示库追加生产化所需字段。
-
-    项目尚未引入 Alembic；这里仅做向后兼容的最小列追加与默认租户回填，
-    便于旧本地 Docker volume 不删除也能继续运行。正式生产迁移应迁入 Alembic。
-    """
+    """仅供原生 SQLite 演示库向后兼容；Docker/生产使用 Alembic。"""
 
     inspector = inspect(engine)
 

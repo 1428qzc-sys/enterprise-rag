@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Dict, List, Optional
 
@@ -87,18 +88,28 @@ class OllamaLLM(BaseLLM):
 
 
 class EchoLLM(BaseLLM):
-    """把上下文与问题拼成一段可预测的中文回答，逐字产出。仅测试/演示用。"""
+    """引用第一条真实上下文的确定性假模型，仅用于功能回归。"""
 
     async def astream(self, messages: List[Message]) -> AsyncIterator[str]:
-        question = ""
+        user_content = ""
         for m in reversed(messages):
             if m["role"] == "user":
-                question = m["content"]
+                user_content = m["content"]
                 break
-        answer = (
-            f"[echo] 已根据检索到的上下文回答问题：{question[:80]} "
-            f"参考来源见下方引用 [1]。"
+        context_match = re.search(
+            r"【已知信息】\s*(.*?)\s*【用户问题】", user_content, flags=re.DOTALL
         )
+        context = context_match.group(1).strip() if context_match else ""
+        source_match = re.search(
+            r"\[1\]\s*来源：[^\n]*\n(.*?)(?:\n</source>|\n\n\[2\]|$)",
+            context,
+            flags=re.DOTALL,
+        )
+        if not source_match or "未检索到相关资料" in context:
+            answer = "不知道"
+        else:
+            excerpt = " ".join(source_match.group(1).strip().split())[:320]
+            answer = f"根据检索到的资料：{excerpt} [1]"
         for ch in answer:
             yield ch
 

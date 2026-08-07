@@ -1,0 +1,232 @@
+{
+  "status": "passed",
+  "started_at": "2026-08-07T10:37:13.944138+00:00",
+  "project": "enterprise-rag-clean-final",
+  "build_no_cache": true,
+  "empty_project_volumes": true,
+  "ports": {
+    "frontend": 19025,
+    "backend": 19026,
+    "qdrant": 19027,
+    "postgres": 19028,
+    "redis": 19029
+  },
+  "max_build_seconds": 1200.0,
+  "max_core_flow_seconds": 600.0,
+  "steps": {
+    "build_no_cache": {
+      "status": "passed",
+      "duration_seconds": 742.109,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "build",
+        "--no-cache"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag"
+    },
+    "start_and_wait": {
+      "status": "passed",
+      "duration_seconds": 44.61,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "up",
+        "-d",
+        "--wait"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag"
+    },
+    "migration_current": {
+      "status": "passed",
+      "duration_seconds": 7.5,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "exec",
+        "-T",
+        "backend",
+        "alembic",
+        "current"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag",
+      "output": "INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transactional DDL.\n20260720_0003 (head)"
+    },
+    "release_smoke": {
+      "status": "passed",
+      "duration_seconds": 5.64,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "exec",
+        "-T",
+        "backend",
+        "python",
+        "scripts/release_smoke.py",
+        "--base-url",
+        "http://127.0.0.1:8000",
+        "--frontend-url",
+        "http://frontend"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag",
+      "output": "{\n  \"started_at\": \"2026-08-07T10:50:30.503007+00:00\",\n  \"base_url\": \"http://127.0.0.1:8000\",\n  \"frontend_url\": \"http://frontend\",\n  \"steps\": {\n    \"readiness\": {\n      \"database\": {\n        \"status\": \"ok\",\n        \"latency_ms\": 2.086\n      },\n      \"vector_store\": {\n        \"status\": \"ok\",\n        \"latency_ms\": 8.568\n      },\n      \"embedding\": {\n        \"status\": \"ok\",\n        \"latency_ms\": 0.099\n      },\n      \"llm\": {\n        \"status\": \"ok\",\n        \"latency_ms\": 0.003\n      },\n      \"redis\": {\n        \"status\": \"ok\",\n        \"latency_ms\": 5.349\n      }\n    },\n    \"frontend\": 200,\n    \"login\": 200,\n    \"v1\": {\n      \"version\": 1,\n      \"chunks\": 1,\n      \"answer_has_18_days\": true,\n      \"citation_verified\": true\n    },\n    \"v2\": {\n      \"version\": 2,\n      \"chunks\": 1,\n      \"answer_has_20_days\": true,\n      \"old_chunks_returned\": false,\n      \"citation_verified\": true\n    },\n    \"reconcile\": {\n      \"status\": \"done\",\n      \"progress\": 100\n    },\n    \"delete\": {\n      \"document\": 204,\n      \"knowledge_base\": 204,\n      \"post_delete\": 404\n    },\n    \"metrics\": true\n  },\n  \"kb_id\": \"879fca96cf6341a28c81586beadfd07b\",\n  \"status\": \"passed\",\n  \"duration_seconds\": 3.852,\n  \"finished_at\": \"2026-08-07T10:50:34.355517+00:00\"\n}"
+    },
+    "fixed_evaluation": {
+      "status": "passed",
+      "duration_seconds": 14.016,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "exec",
+        "-T",
+        "backend",
+        "python",
+        "scripts/evaluate.py",
+        "--api",
+        "http://127.0.0.1:8000",
+        "--bootstrap",
+        "--provision-cross-tenant",
+        "--report",
+        "/app/data/fixed-eval-report.json"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag",
+      "output": "固定评估：31 题，top_k=5\nHit@5: 1.0000\nMRR: 1.0000\n引用正确率: 1.0000\n答案要点准确率: 1.0000\n无答案准确率: 1.0000\n提示注入安全率: 1.0000\n跨租户隔离率: 1.0000\n多轮会话保持率: 1.0000\n报告: /app/data/fixed-eval-report.json"
+    },
+    "copy_fixed_eval_report": {
+      "status": "passed",
+      "duration_seconds": 1.312,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "cp",
+        "backend:/app/data/fixed-eval-report.json",
+        "artifacts\\fixed-eval-report.json"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag",
+      "output": "enterprise-rag-clean-final-backend-1 Copying enterprise-rag-clean-final-backend-1:/app/data/fixed-eval-report.json to artifacts\\fixed-eval-report.json\n enterprise-rag-clean-final-backend-1 Copied enterprise-rag-clean-final-backend-1:/app/data/fixed-eval-report.json to artifacts\\fixed-eval-report.json"
+    },
+    "playwright_e2e": {
+      "status": "passed",
+      "duration_seconds": 26.422,
+      "command": [
+        "D:\\Programs\\nodejs\\npm.cmd",
+        "run",
+        "e2e"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag\\frontend",
+      "output": "> enterprise-rag-frontend@1.0.0-rc.1 e2e\n> playwright test\n\n\nRunning 1 test using 1 worker\n\n  ok 1 [chromium] › e2e\\enterprise-rag.e2e.ts:74:1 › 租户管理员完成版本化 RAG 长链路并验证引用定位 (18.7s)\n\n  1 passed (22.7s)"
+    },
+    "lighthouse": {
+      "status": "passed",
+      "duration_seconds": 23.234,
+      "command": [
+        "D:\\Programs\\nodejs\\npm.cmd",
+        "run",
+        "lighthouse"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag\\frontend",
+      "output": "> enterprise-rag-frontend@1.0.0-rc.1 lighthouse\n> node scripts/lighthouse.mjs\n\nLighthouse 2026-08-07T10:51:29.781Z: performance=97, accessibility=100, best-practices=100\nReport: D:\\project-hub\\enterprise-rag\\artifacts\\lighthouse.json"
+    },
+    "compose_ps": {
+      "status": "passed",
+      "duration_seconds": 0.828,
+      "command": [
+        "docker",
+        "compose",
+        "--env-file",
+        ".env.example",
+        "-p",
+        "enterprise-rag-clean-final",
+        "ps",
+        "--format",
+        "json"
+      ],
+      "cwd": "D:\\project-hub\\enterprise-rag",
+      "output": "{\"Command\":\"\\\"sh -c 'alembic upgr…\\\"\",\"CreatedAt\":\"2026-08-07 18:49:40 +0800 CST\",\"ExitCode\":0,\"Health\":\"healthy\",\"ID\":\"3178200d41af\",\"Image\":\"enterprise-rag-clean-final-backend\",\"Labels\":\"desktop.docker.io/ports/8000/tcp=:19026,com.docker.compose.config-hash=b77d835f863b3517158fb0687a9718e3a263e1c4edae3c4c95978e04e24dfddc,com.docker.compose.depends_on=postgres:service_healthy:false,qdrant:service_healthy:false,redis:service_healthy:false,com.docker.compose.image=sha256:a31a818a814e960e5f3a9a53fa68bfdd30641dbdc83f44c327e8c11639a80421,com.docker.compose.oneoff=False,com.docker.compose.project.environment_file=D:\\\\project-hub\\\\enterprise-rag\\\\.env.example,com.docker.compose.project.working_dir=D:\\\\project-hub\\\\enterprise-rag,desktop.docker.io/ports.scheme=v2,com.docker.compose.container-number=1,com.docker.compose.project=enterprise-rag-clean-final,com.docker.compose.project.config_files=D:\\\\project-hub\\\\enterprise-rag\\\\docker-compose.yml,com.docker.compose.service=backend,com.docker.compose.version=5.3.1\",\"LocalVolumes\":\"1\",\"Mounts\":\"enterprise-rag…\",\"Name\":\"enterprise-rag-clean-final-backend-1\",\"Names\":\"enterprise-rag-clean-final-backend-1\",\"Networks\":\"enterprise-rag-clean-final_default\",\"Ports\":\"0.0.0.0:19026-\\u003e8000/tcp, [::]:19026-\\u003e8000/tcp\",\"Project\":\"enterprise-rag-clean-final\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":8000,\"PublishedPort\":19026,\"Protocol\":\"tcp\"},{\"URL\":\"::\",\"TargetPort\":8000,\"PublishedPort\":19026,\"Protocol\":\"tcp\"}],\"RunningFor\":\"2 minutes ago\",\"Service\":\"backend\",\"Size\":\"0B\",\"State\":\"running\",\"Status\":\"Up About a minute (healthy)\"}\n{\"Command\":\"\\\"/docker-entrypoint.…\\\"\",\"CreatedAt\":\"2026-08-07 18:49:40 +0800 CST\",\"ExitCode\":0,\"Health\":\"healthy\",\"ID\":\"356a1b332d22\",\"Image\":\"enterprise-rag-clean-final-frontend\",\"Labels\":\"desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=ba378fd8c0af83ac57d5d400045a8e77719c3bad8e6200186427b4484d1fb931,com.docker.compose.project.config_files=D:\\\\project-hub\\\\enterprise-rag\\\\docker-compose.yml,com.docker.compose.project.environment_file=D:\\\\project-hub\\\\enterprise-rag\\\\.env.example,com.docker.compose.service=frontend,desktop.docker.io/ports/80/tcp=:19025,maintainer=NGINX Docker Maintainers \\u003cdocker-maint@nginx.com\\u003e,com.docker.compose.container-number=1,com.docker.compose.depends_on=backend:service_healthy:false,com.docker.compose.image=sha256:228b12d74f68d97824f67f6424782894f3219504add0cd43d555cec5952ea162,com.docker.compose.oneoff=False,com.docker.compose.project=enterprise-rag-clean-final,com.docker.compose.project.working_dir=D:\\\\project-hub\\\\enterprise-rag,com.docker.compose.version=5.3.1\",\"LocalVolumes\":\"0\",\"Mounts\":\"\",\"Name\":\"enterprise-rag-clean-final-frontend-1\",\"Names\":\"enterprise-rag-clean-final-frontend-1\",\"Networks\":\"enterprise-rag-clean-final_default\",\"Ports\":\"0.0.0.0:19025-\\u003e80/tcp, [::]:19025-\\u003e80/tcp\",\"Project\":\"enterprise-rag-clean-final\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":80,\"PublishedPort\":19025,\"Protocol\":\"tcp\"},{\"URL\":\"::\",\"TargetPort\":80,\"PublishedPort\":19025,\"Protocol\":\"tcp\"}],\"RunningFor\":\"2 minutes ago\",\"Service\":\"frontend\",\"Size\":\"0B\",\"State\":\"running\",\"Status\":\"Up About a minute (healthy)\"}\n{\"Command\":\"\\\"docker-entrypoint.s…\\\"\",\"CreatedAt\":\"2026-08-07 18:49:39 +0800 CST\",\"ExitCode\":0,\"Health\":\"healthy\",\"ID\":\"e27129c1ddff\",\"Image\":\"postgres:16-alpine\",\"Labels\":\"desktop.docker.io/ports/5432/tcp=:19028,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb,com.docker.compose.project=enterprise-rag-clean-final,com.docker.compose.project.environment_file=D:\\\\project-hub\\\\enterprise-rag\\\\.env.example,com.docker.compose.service=postgres,com.docker.compose.version=5.3.1,desktop.docker.io/ports.scheme=v2,com.docker.compose.config-hash=bb78f5dc65a715993b1f88608e59285892f1d64f86447fe7369acca13ed8d36f,com.docker.compose.oneoff=False,com.docker.compose.project.config_files=D:\\\\project-hub\\\\enterprise-rag\\\\docker-compose.yml,com.docker.compose.project.working_dir=D:\\\\project-hub\\\\enterprise-rag\",\"LocalVolumes\":\"1\",\"Mounts\":\"enterprise-rag…\",\"Name\":\"enterprise-rag-clean-final-postgres-1\",\"Names\":\"enterprise-rag-clean-final-postgres-1\",\"Networks\":\"enterprise-rag-clean-final_default\",\"Ports\":\"0.0.0.0:19028-\\u003e5432/tcp, [::]:19028-\\u003e5432/tcp\",\"Project\":\"enterprise-rag-clean-final\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":5432,\"PublishedPort\":19028,\"Protocol\":\"tcp\"},{\"URL\":\"::\",\"TargetPort\":5432,\"PublishedPort\":19028,\"Protocol\":\"tcp\"}],\"RunningFor\":\"2 minutes ago\",\"Service\":\"postgres\",\"Size\":\"0B\",\"State\":\"running\",\"Status\":\"Up About a minute (healthy)\"}\n{\"Command\":\"\\\"./entrypoint.sh\\\"\",\"CreatedAt\":\"2026-08-07 18:49:39 +0800 CST\",\"ExitCode\":0,\"Health\":\"healthy\",\"ID\":\"828dac4d0c3a\",\"Image\":\"qdrant/qdrant:v1.18.2\",\"Labels\":\"com.docker.compose.project.environment_file=D:\\\\project-hub\\\\enterprise-rag\\\\.env.example,org.opencontainers.image.description=Official Qdrant image,org.opencontainers.image.title=Qdrant,org.opencontainers.image.vendor=Qdrant,com.docker.compose.container-number=1,com.docker.compose.oneoff=False,com.docker.compose.project.working_dir=D:\\\\project-hub\\\\enterprise-rag,com.docker.compose.config-hash=f2dd8a0ba634390aadc3b30aed360defa8a8f639500bf7276bd4c553c54ecf09,com.docker.compose.depends_on=,com.docker.compose.project=enterprise-rag-clean-final,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/6333/tcp=:19027,org.opencontainers.image.url=https://qdrant.com/,com.docker.compose.image=sha256:75eab8c4ba42096724fdcfde8b4de0b5713d529dde32f285a1f86fdcb2c9e50c,com.docker.compose.project.config_files=D:\\\\project-hub\\\\enterprise-rag\\\\docker-compose.yml,com.docker.compose.service=qdrant,com.docker.compose.version=5.3.1,org.opencontainers.image.documentation=https://qdrant.com/docs,org.opencontainers.image.source=https://github.com/qdrant/qdrant,org.opencontainers.image.version=v1.18.2\",\"LocalVolumes\":\"1\",\"Mounts\":\"enterprise-rag…\",\"Name\":\"enterprise-rag-clean-final-qdrant-1\",\"Names\":\"enterprise-rag-clean-final-qdrant-1\",\"Networks\":\"enterprise-rag-clean-final_default\",\"Ports\":\"0.0.0.0:19027-\\u003e6333/tcp, [::]:19027-\\u003e6333/tcp\",\"Project\":\"enterprise-rag-clean-final\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":6333,\"PublishedPort\":19027,\"Protocol\":\"tcp\"},{\"URL\":\"::\",\"TargetPort\":6333,\"PublishedPort\":19027,\"Protocol\":\"tcp\"}],\"RunningFor\":\"2 minutes ago\",\"Service\":\"qdrant\",\"Size\":\"0B\",\"State\":\"running\",\"Status\":\"Up About a minute (healthy)\"}\n{\"Command\":\"\\\"docker-entrypoint.s…\\\"\",\"CreatedAt\":\"2026-08-07 18:49:39 +0800 CST\",\"ExitCode\":0,\"Health\":\"healthy\",\"ID\":\"3bc01796c65c\",\"Image\":\"redis:7.4.9-alpine\",\"Labels\":\"com.docker.compose.oneoff=False,com.docker.compose.project.config_files=D:\\\\project-hub\\\\enterprise-rag\\\\docker-compose.yml,com.docker.compose.project.environment_file=D:\\\\project-hub\\\\enterprise-rag\\\\.env.example,com.docker.compose.project.working_dir=D:\\\\project-hub\\\\enterprise-rag,com.docker.compose.service=redis,com.docker.compose.version=5.3.1,com.docker.compose.container-number=1,com.docker.compose.depends_on=,com.docker.compose.image=sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99,com.docker.compose.project=enterprise-rag-clean-final,desktop.docker.io/ports.scheme=v2,desktop.docker.io/ports/6379/tcp=:19029,com.docker.compose.config-hash=052579a7eaed02d628ee3a073d07da9b0581d365c22c7525c22222e1f7f568cc\",\"LocalVolumes\":\"1\",\"Mounts\":\"enterprise-rag…\",\"Name\":\"enterprise-rag-clean-final-redis-1\",\"Names\":\"enterprise-rag-clean-final-redis-1\",\"Networks\":\"enterprise-rag-clean-final_default\",\"Ports\":\"0.0.0.0:19029-\\u003e6379/tcp, [::]:19029-\\u003e6379/tcp\",\"Project\":\"enterprise-rag-clean-final\",\"Publishers\":[{\"URL\":\"0.0.0.0\",\"TargetPort\":6379,\"PublishedPort\":19029,\"Protocol\":\"tcp\"},{\"URL\":\"::\",\"TargetPort\":6379,\"PublishedPort\":19029,\"Protocol\":\"tcp\"}],\"RunningFor\":\"2 minutes ago\",\"Service\":\"redis\",\"Size\":\"0B\",\"State\":\"running\",\"Status\":\"Up About a minute (healthy)\"}"
+    }
+  },
+  "core_flow_seconds": 57.766,
+  "core_flow_under_budget": true,
+  "cold_checkout_flow_seconds": 800.531,
+  "fixed_evaluation": {
+    "report": "artifacts\\fixed-eval-report.json",
+    "metrics": {
+      "case_count": 31,
+      "answerable_count": 24,
+      "hit_at_k": 1.0,
+      "mrr": 1.0,
+      "citation_correctness": 1.0,
+      "answer_term_accuracy": 1.0,
+      "no_answer_accuracy": 1.0,
+      "prompt_injection_safety": 1.0,
+      "cross_tenant_isolation": 1.0,
+      "multi_turn_chain_accuracy": 1.0
+    },
+    "gates": {
+      "hit_at_k": true,
+      "mrr": true,
+      "citation_correctness": true,
+      "answer_term_accuracy": true,
+      "no_answer_accuracy": true,
+      "prompt_injection_safety": true,
+      "cross_tenant_isolation": true,
+      "multi_turn_chain_accuracy": true
+    }
+  },
+  "screenshots": [
+    {
+      "path": "docs\\screenshots\\chat-1440x900.png",
+      "bytes": 100714
+    },
+    {
+      "path": "docs\\screenshots\\chat-768x1024.png",
+      "bytes": 97873
+    },
+    {
+      "path": "docs\\screenshots\\chat-375x812.png",
+      "bytes": 53232
+    }
+  ],
+  "lighthouse_scores": {
+    "performance": 0.97,
+    "accessibility": 1.0,
+    "best-practices": 1.0
+  },
+  "quality_flow_seconds": 866.375,
+  "cleanup": {
+    "status": "passed",
+    "duration_seconds": 8.015,
+    "return_code": 0,
+    "leftovers": {
+      "containers": [],
+      "volumes": [],
+      "networks": []
+    }
+  },
+  "finished_at": "2026-08-07T10:51:48.337916+00:00",
+  "duration_seconds": 874.39
+}

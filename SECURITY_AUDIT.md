@@ -1,91 +1,38 @@
-# Enterprise RAG 安全审计记录
+# Enterprise RAG 安全审计快照
 
-审计日期：2026-07-06
+审计版本：`1.0.0-rc.1`
+审计日期：2026-07-20
+范围：FastAPI、Vue、PostgreSQL、Qdrant、Redis、文件/URL 入库、RAG 检索与 Docker 配置。
 
-## 范围
+本文只记录可由当前代码和测试复现的控制，不是第三方认证或公网渗透测试报告。
 
-- 后端 FastAPI API
-- 前端 Vue 应用
-- Docker Compose 部署
-- 认证、多租户、上传、RAG 检索、网页 URL 抓取
+## 风险与证据
 
-## 已完成修复
-
-| 风险 | 状态 | 证据 |
+| 风险 | 当前控制 | 自动化证据 |
 | --- | --- | --- |
-| 业务 API 无鉴权 | 已修复 | 新增 `/api/auth/login`、Bearer token、业务接口权限依赖 |
-| 知识库全局可见 | 已修复 | `KnowledgeBase.tenant_id`，列表/详情/更新/删除按租户过滤 |
-| 文档全局可见 | 已修复 | `Document.tenant_id`，文档 API 先校验知识库租户 |
-| 会话可跨 KB 复用 | 已修复 | `ensure_conversation()` 要求已有会话属于当前知识库 |
-| 前端不带认证头 | 已修复 | Axios 拦截器和 SSE fetch 均发送 Bearer token |
-| 缺少越权测试 | 已修复 | `test_cross_tenant_kb_is_not_visible` |
-| SSRF / 外部 URL 抓取 | 已修复 | `security_network.py` 校验公网地址，限制重定向、大小与超时；`test_security_hardening.py` 覆盖 localhost/私网/metadata |
-| 缺少安全响应头 | 已修复 | `security_middleware.py` 返回 `nosniff`、`DENY`、CSP、Permissions-Policy |
-| 缺少基础限流和超时 | 已修复 | `InMemoryRateLimitMiddleware` 与 `REQUEST_TIMEOUT_SECONDS` |
-| 缺少关键操作审计 | 已修复 | 新增 `audit_log` 表、`record_audit()` 与 `/api/admin/audit-logs` |
-| 缺少正式迁移骨架 | 已修复 | 新增 Alembic 基线 `20260706_0001` |
+| 未登录或权限绕过 | JWT、主体重载、服务端权限依赖 | `test_api.py`、`test_tenant_rbac.py` |
+| 跨租户对象访问 | 所有资源按 tenant 过滤，外租户对象返回 404 | 完整读/写/删/版本/任务矩阵 |
+| superuser 跨租户 | superuser 只获得本租户全部权限 | `test_superuser_cannot_cross_tenant` 类回归 |
+| 限流多副本不一致 | Redis Lua 原子计数；生产强制 fail-closed | `test_rate_limit.py` |
+| SSRF/metadata | DNS/IP/每次重定向复核、大小与超时限制 | `test_security_hardening.py` |
+| 伪造文件扩展名 | PDF/Office/Text 内容结构检查 | 文档生命周期文件安全参数化测试 |
+| 数据/向量错位 | 版本 staging、激活补偿、删除恢复、reconcile | `test_document_lifecycle.py`、`test_vector_store_contract.py` |
+| 向量空间混用 | collection 维度校验、新 revision 构建后切换 | `test_reindexing.py` |
+| 假引用 | 来源回源过滤、答案引用范围校验、无证据短路 | `test_rag.py`、固定评估、真实 PDF 页码测试 |
+| Prompt injection | 可疑 Chunk 标记并从生成上下文隔离 | 固定评估 injection 用例 |
+| 日志泄密 | 字段白名单、Token/secret/email 脱敏、不记正文 | `test_observability.py` |
+| 演示配置误上生产 | production 启动门禁拒绝 Mock 和单进程后端 | `test_observability.py` |
 
-## 依赖扫描
+## 仍需部署方承担
 
-当前要求：
+- 真实域名、TLS/WAF 和公网攻击面测试。
+- Secret manager、密钥轮换和集中 SIEM。
+- 恶意文件病毒扫描或 CDR。
+- 真实模型供应商的数据使用、越狱与内容安全评估。
+- 针对组织数据分类的保留、删除、加密与合规流程。
 
-```bash
-cd frontend
-npm audit --audit-level=high
-```
+## 已知限制
 
-Python 依赖建议在生产流水线补充：
+浏览器令牌位于 local storage，没有 refresh/revocation 列表；上传没有病毒扫描；提示注入检测属于启发式防御。上述边界已在 [SECURITY.md](SECURITY.md) 明示，不作为“已消除风险”宣传。
 
-```bash
-pip install pip-audit
-pip-audit -r backend/requirements.txt
-```
-
-## Secret 扫描
-
-建议命令：
-
-```bash
-git grep -n -I -E "sk-[A-Za-z0-9]|AKIA[0-9A-Z]{16}|BEGIN (RSA|OPENSSH) PRIVATE KEY"
-```
-
-注意：`.env` 不应提交，`.env.example` 只允许占位值。
-
-## 上传安全
-
-已有限制：
-
-- 扩展名白名单：由 `SUPPORTED_EXTS` 控制。
-- 大小限制：`MAX_UPLOAD_MB`。
-
-待增强：
-
-- MIME 与文件头校验。
-- 病毒扫描。
-- 上传目录隔离为对象存储或非 Web 根目录。
-
-## SSRF / 外部 URL 抓取
-
-当前 `/documents/url` 已在创建文档前校验：
-
-- 仅允许 `http://` / `https://`。
-- 禁止 localhost、私网、链路本地、保留地址、IPv6 loopback 和常见 metadata endpoint。
-- DNS 解析后校验所有解析出的 IP。
-- 每次重定向后重新校验目标 URL。
-- 限制 `URL_FETCH_MAX_REDIRECTS`、`URL_FETCH_MAX_MB` 和 `URL_FETCH_TIMEOUT_SECONDS`。
-
-## AI / RAG 风险
-
-| 风险 | 处理 |
-| --- | --- |
-| Prompt Injection | 系统提示限制“只依据已知信息”，但仍需增加文档级不可信内容标记 |
-| RAG 数据泄露 | 通过租户级 KB 校验降低跨租户泄露风险 |
-| 引用伪造 | 前端展示结构化 sources，答案仍需人工判断 |
-| 外部 URL 恶意内容 | 需结合 SSRF 与内容安全策略继续加强 |
-
-## 剩余风险
-
-- 尚未完成真实公网生产环境的 HTTPS、WAF、集中日志和告警验证。
-- 100 并发 k6 压测已在 Docker 本地环境完成（见 [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md)）；公网生产链路待复测。
-- 当前审计日志已落库并可查，但尚未接入集中日志/SIEM。
-- 当前限流为单进程内存限流，多副本生产部署应迁移到网关或 Redis 限流。
+正式依赖与 secret scan 结果以本次验收输出为准，未运行前不在本文预写“零漏洞”结论。

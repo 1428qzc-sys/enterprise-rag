@@ -22,6 +22,20 @@ jieba.setLogLevel(20)
 
 _WORD_RE = re.compile(r"[a-z0-9]+", re.IGNORECASE)
 _lock = threading.RLock()
+_warmed_up = False
+
+
+def warmup() -> None:
+    """在 readiness 之前加载 Jieba 词典，避免首个检索承担数秒冷启动。"""
+
+    global _warmed_up
+    with _lock:
+        if _warmed_up:
+            return
+        jieba.initialize()
+        # 同时走一遍中英混合路径，提前编译/填充相关内部缓存。
+        tokenize("企业知识库 Enterprise RAG 检索预热 2026")
+        _warmed_up = True
 
 
 def tokenize(text: str) -> List[str]:
@@ -35,9 +49,15 @@ def tokenize(text: str) -> List[str]:
 
 
 class _KBIndex:
-    def __init__(self, chunk_ids: List[str], bm25: Optional[BM25Okapi]):
+    def __init__(
+        self,
+        chunk_ids: List[str],
+        bm25: Optional[BM25Okapi],
+        corpus: List[List[str]],
+    ):
         self.chunk_ids = chunk_ids
         self.bm25 = bm25
+        self.corpus = corpus
 
 
 _CACHE: Dict[str, _KBIndex] = {}
@@ -45,12 +65,15 @@ _CACHE: Dict[str, _KBIndex] = {}
 
 def _build(session: Session, kb_id: str) -> _KBIndex:
     rows = session.exec(
-        select(Chunk.id, Chunk.content).where(Chunk.kb_id == kb_id)
+        select(Chunk.id, Chunk.content).where(
+            Chunk.kb_id == kb_id,
+            Chunk.is_active.is_(True),
+        )
     ).all()
     chunk_ids = [r[0] for r in rows]
     corpus = [tokenize(r[1]) for r in rows]
     bm25 = BM25Okapi(corpus) if corpus else None
-    return _KBIndex(chunk_ids=chunk_ids, bm25=bm25)
+    return _KBIndex(chunk_ids=chunk_ids, bm25=bm25, corpus=corpus)
 
 
 def _get_index(session: Session, kb_id: str) -> _KBIndex:
@@ -72,6 +95,18 @@ def search(session: Session, kb_id: str, query: str, top_k: int) -> List[Tuple[s
     idx = _get_index(session, kb_id)
     if idx.bm25 is None or not idx.chunk_ids:
         return []
-    scores = idx.bm25.get_scores(tokenize(query))
-    ranked = sorted(zip(idx.chunk_ids, scores), key=lambda x: x[1], reverse=True)
-    return [(cid, float(s)) for cid, s in ranked[:top_k] if s > 0]
+    query_tokens = tokenize(query)
+    scores = idx.bm25.get_scores(query_tokens)
+    query_set = set(query_tokens)
+    ranked: List[Tuple[str, float]] = []
+    for chunk_id, raw_score, tokens in zip(idx.chunk_ids, scores, idx.corpus):
+        overlap = len(query_set & set(tokens))
+        if overlap == 0:
+            continue
+        # BM25Okapi 在极小语料中会因 IDF=0 返回 0；词项覆盖率只在该退化场景回退。
+        effective_score = float(raw_score)
+        if effective_score <= 0:
+            effective_score = overlap / max(1, len(query_set))
+        ranked.append((chunk_id, effective_score))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+    return ranked[:top_k]

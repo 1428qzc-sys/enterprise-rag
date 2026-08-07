@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from ..audit import record_audit
 from ..database import get_session
-from ..models import Tenant, User
+from ..models import Role, Tenant, User, UserRole
 from ..schemas import LoginRequest, MeResponse, TenantRead, TokenResponse, UserRead
 from ..security import Principal, create_access_token, verify_password
 from .deps import get_current_principal
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _to_user_read(principal: Principal) -> UserRead:
+    role_rows = principal.roles
     return UserRead(
         id=principal.user.id,
         tenant_id=principal.user.tenant_id,
@@ -24,6 +25,8 @@ def _to_user_read(principal: Principal) -> UserRead:
         is_active=principal.user.is_active,
         is_superuser=principal.user.is_superuser,
         permissions=sorted(principal.permissions),
+        role_ids=[role.id for role in role_rows],
+        role_names=[role.name for role in role_rows],
     )
 
 
@@ -38,22 +41,34 @@ def login(
     session: Session = Depends(get_session),
 ) -> TokenResponse:
     email = body.email.lower().strip()
-    user = session.exec(select(User).where(User.email == email)).first()
+    tenant_slug = (body.tenant_slug or "").lower().strip()
+    tenant = None
+    user = None
+    if tenant_slug:
+        tenant = session.exec(select(Tenant).where(Tenant.slug == tenant_slug)).first()
+        if tenant is not None:
+            user = session.exec(
+                select(User).where(User.tenant_id == tenant.id, User.email == email)
+            ).first()
+    else:
+        matches = session.exec(select(User).where(User.email == email)).all()
+        if len(matches) == 1:
+            user = matches[0]
     if user is None or not user.is_active or not verify_password(body.password, user.password_hash):
         record_audit(
             "auth.login",
             "failure",
             request=request,
-            tenant_id=user.tenant_id if user else "",
+            tenant_id=(tenant.id if tenant else user.tenant_id if user else ""),
             user_id=user.id if user else "",
-            detail={"email": email},
+            detail={"email": email, "tenant_slug": tenant_slug},
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="邮箱或密码错误",
+            detail="租户、邮箱或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    tenant = session.get(Tenant, user.tenant_id)
+    tenant = tenant or session.get(Tenant, user.tenant_id)
     if tenant is None or not tenant.is_active:
         record_audit(
             "auth.login",
@@ -68,10 +83,17 @@ def login(
     # 登录响应里的权限用于前端展示；Token 本身只保存主体身份，权限每次由数据库计算。
     from ..security import permissions_for_user
 
+    roles = session.exec(
+        select(Role)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user.id, Role.tenant_id == user.tenant_id)
+        .order_by(Role.name)
+    ).all()
     principal = Principal(
         user=user,
         tenant=tenant,
         permissions=permissions_for_user(session, user),
+        roles=tuple(roles),
     )
     record_audit("auth.login", "success", request=request, principal=principal, detail={"email": email})
     return TokenResponse(

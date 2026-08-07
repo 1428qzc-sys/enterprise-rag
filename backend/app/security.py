@@ -50,6 +50,7 @@ class Principal:
     user: User
     tenant: Tenant
     permissions: Set[str]
+    roles: tuple[Role, ...] = ()
 
     @property
     def user_id(self) -> str:
@@ -154,7 +155,7 @@ def permissions_for_user(session: Session, user: User) -> Set[str]:
         select(RolePermission.permission_code)
         .join(Role, Role.id == RolePermission.role_id)
         .join(UserRole, UserRole.role_id == Role.id)
-        .where(UserRole.user_id == user.id)
+        .where(UserRole.user_id == user.id, Role.tenant_id == user.tenant_id)
     ).all()
     return set(rows)
 
@@ -211,7 +212,9 @@ def ensure_bootstrap_identity(session: Session) -> None:
 
     admin_role = _ensure_role(session, tenant.id, ADMIN_ROLE, DEFAULT_PERMISSIONS.keys())
     email = settings.bootstrap_admin_email.lower().strip()
-    user = session.exec(select(User).where(User.email == email)).first()
+    user = session.exec(
+        select(User).where(User.tenant_id == tenant.id, User.email == email)
+    ).first()
     if user is None:
         user = User(
             tenant_id=tenant.id,

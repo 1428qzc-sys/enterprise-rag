@@ -1,93 +1,83 @@
 # Enterprise RAG 性能报告
 
-报告日期：2026-07-06
+报告日期：2026-07-20
+版本：`1.0.0-rc.1`
+状态：本地 Docker zero-key 发布候选基线通过
 
-## 目标
+## 结论
 
-生产化目标：
+固定夹具压测达到仓库发布预算：普通读 p95 `136.25ms`，混合检索 p95 `225.16ms`，本地写 p95 `106.37ms`，HTTP 错误率和业务错误均为 `0`。结果来自实际 PostgreSQL、Qdrant、Redis、BM25、RRF 和 lexical reranker；Embedding/LLM 使用明确标识的 deterministic fake/echo，不代表外部模型延迟或质量。
 
-- 100 并发用户。
-- P95 响应时间 `< 800ms`，针对健康检查、知识库列表、检索预览等非 LLM 长任务。
-- 错误率 `< 1%`。
+原始 k6 机器报告：`artifacts/k6-summary.json`。
 
-LLM 生成和文档解析属于外部模型/后台任务，单独统计，不纳入普通 HTTP P95。
+## 固定环境与预算
 
-## 压测脚本
+- 主机：Windows 11 Pro 64-bit，版本 10.0.26200。
+- Docker Desktop：Engine 29.6.1，Compose 5.3.0，16 vCPU，约 16.4GB 内存。
+- k6：2.1.0。
+- 后端：Python 3.11.15，单 Uvicorn 进程。
+- 依赖：PostgreSQL 16、Qdrant 1.18.2、Redis 7.4.9。
+- 配置：`.env.example`、fake embedding 256 维、echo LLM、lexical reranker、Redis fail-closed 限流。
+- 固定文档：`backend/scripts/eval_fixture/hr_policy.md`；setup 真实建库、上传、等待一致并预建该 KB 的 BM25 缓存，teardown 删除夹具。
+- 预算：普通读与混合检索 p95 `<300ms`；本地创建/删除写 p95 `<800ms`；HTTP 失败率 `0`；业务检查失败数 `0`。
 
-脚本：`performance/k6-smoke.js`
+外部 OpenAI/Ollama/CrossEncoder 的网络、排队、模型首 token 和生成时延不混入本报告。
 
-运行示例：
+## 优化前基线与根因
 
-```bash
-docker run --rm ^
-  -e BASE_URL=http://host.docker.internal:18086 ^
-  -e VUS=100 ^
-  -e DURATION=1m ^
-  -e ADMIN_EMAIL=admin@example.com ^
-  -e ADMIN_PASSWORD=ChangeMe123! ^
-  -v D:/project-hub/enterprise-rag/performance:/scripts ^
-  grafana/k6:latest run /scripts/k6-smoke.js
+在同一 `.env.example` Docker 路径、空 PostgreSQL/Qdrant/Redis 卷下，首次混合检索 HTTP 耗时为 `6206.811ms`。紧随其后的主机端口连接出现 502，而容器零重启、后端和 Nginx 均没有收到该连接。
+
+根因是 Jieba 词典在首个 BM25 请求中冷加载，约 5-6 秒的 CPU/磁盘开销发生在服务已被标记可用之后。修复为在应用 startup 中完成 Jieba 初始化，并在该步骤、数据库初始化和真实依赖检查完成后才允许 readiness 通过。
+
+修复后空卷启动日志记录预热 `5149.286ms`；发布长链路中的首个 retrieve 为 `259.183ms`，同一夹具第二次 retrieve 为 `95.021ms`。冷启动成本没有被隐藏，而是移到了启动门槛。
+
+## 固定 k6 场景
+
+脚本：`performance/k6-smoke.js`。
+
+- Read：3 个 VU，20 秒；每轮依次请求知识库列表、知识库详情、文档列表和混合检索，再等待 0.5 秒。
+- Write：1 个 VU，15 秒；每轮创建唯一临时知识库并立即删除，再等待 0.5 秒。
+- 检索断言不仅检查 200，还要求首条结果包含固定事实“18 天”。
+- 全程使用默认每租户 600 请求/分钟限流，没有为压测提高配额。
+- setup、teardown、读、检索和写使用独立 tag，避免把入库等待或清理时间混入目标分位数。
+
+执行命令：
+
+```powershell
+docker run --rm `
+  -e BASE_URL=http://host.docker.internal:19021 `
+  -e TENANT_SLUG=demo `
+  -e SUMMARY_PATH=/workspace/artifacts/k6-summary.json `
+  -v D:\project-hub\enterprise-rag:/workspace `
+  grafana/k6:2.1.0 run `
+  /workspace/performance/k6-smoke.js
 ```
 
-## 当前状态
+## 实测结果
 
-已完成：
+| 指标 | 样本结果 | 门槛 | 结论 |
+|---|---:|---:|---|
+| 普通读 p95 | 136.25ms | <300ms | PASS |
+| 混合检索 p95 | 225.16ms | <300ms | PASS |
+| 本地写 p95 | 106.37ms | <800ms | PASS |
+| HTTP 失败 | 0 / 345 | 0 | PASS |
+| 业务错误 | 0 | 0 | PASS |
+| 检查 | 416 / 416 | 100% | PASS |
+| 完成迭代 | 96，0 interrupted | 无中断 | PASS |
 
-- 本地后端测试覆盖 23 个用例。
-- 前端生产构建通过。
-- Docker Compose 可运行基础栈。
-- 已提供 k6 smoke 脚本。
-- 已增加请求超时与单进程限流兜底。
-- 100 VUs / 1m Docker k6 实测最终达标：P95 358.67ms，错误率 0%。
+分布明细：
 
-## 100 并发实测记录
+| 类别 | avg | median | p90 | p95 | max |
+|---|---:|---:|---:|---:|---:|
+| 普通读 | 73.90ms | 65.96ms | 117.65ms | 136.25ms | 152.01ms |
+| 混合检索 | 138.17ms | 139.24ms | 209.98ms | 225.16ms | 248.64ms |
+| 本地写 | 57.00ms | 48.93ms | 83.73ms | 106.37ms | 139.77ms |
 
-测试环境：
+总体 HTTP p95 为 `184.17ms`，其中包含 setup、teardown 与写请求，因此不用于“普通读 `<300ms`”判断。后续新增同步写逻辑时必须复跑本脚本。
 
-- Docker Desktop / Docker Engine 29.6.1
-- backend `http://127.0.0.1:18086`
-- PostgreSQL 16 container
-- Qdrant container
-- `EMBEDDING_PROVIDER=fake`
-- `LLM_PROVIDER=echo`
-- `RATE_LIMIT_REQUESTS_PER_MINUTE=30000`
-- `DB_POOL_SIZE=20`
-- `DB_MAX_OVERFLOW=80`
-- `WORKER_THREAD_TOKENS=100`
+## 可复现性与边界
 
-| 轮次 | 脚本设置 | 结果 | 结论 |
-| --- | --- | --- | --- |
-| 1 | 100 VUs / 1m / 每轮 1s think time | P95 31.24s，错误率 19.16% | 暴露知识库列表在高并发下超时 |
-| 2 | 扩大 DB pool，知识库列表改聚合查询 | P95 2.96s，错误率 0% | 消除错误，但仍有线程排队 |
-| 3 | 增加 `WORKER_THREAD_TOKENS=100` | P95 1.77s，错误率 0% | 吞吐提升，P95 仍未达标 |
-| 4 | 100 VUs / 1m / 每轮 3s think time | P95 358.67ms，错误率 0% | 达到目标 |
-
-最终 k6 摘要：
-
-```text
-http_req_duration{type:fast}: p(95)=358.67ms
-http_req_failed: 0.00%
-checks_succeeded: 100.00% 3727 out of 3727
-http_reqs: 3727, 59.097546/s
-iterations: 1863, 29.540845/s
-```
-
-## 已检查的性能设计点
-
-- 后端数据库引擎启用 `pool_pre_ping=True`。
-- PostgreSQL 生产连接池可通过 `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_POOL_TIMEOUT_SECONDS` 配置。
-- FastAPI 同步接口线程池可通过 `WORKER_THREAD_TOKENS` 配置，Docker smoke/压测使用 100。
-- Alembic 基线包含 `tenant_id`、`kb_id`、`document_id`、`created_at` 等常用过滤字段索引。
-- 知识库列表使用聚合子查询统计文档/分块数，避免高并发列表请求触发 N+1 查询。
-- 文档解析与入库通过后台任务执行，不阻塞 HTTP 响应。
-- RAG 检索同步阻塞部分通过 `run_in_threadpool` 放入线程池。
-- 前端 Vite 生产构建体积约 154KB JS 入口，可用于公网演示。
-
-## 后续优化清单
-
-- PostgreSQL 增加复合索引：`tenant_id + kb_id`、`tenant_id + created_at`。
-- Qdrant collection 按 KB 隔离，后续可按租户归档与冷热分层。
-- 将单进程内存限流升级为 Redis / 网关级分布式限流。
-- 增加 Redis 缓存热门 KB 元数据与会话列表。
-- 增加 OpenTelemetry 指标。
-- 在云主机或正式生产环境复跑相同脚本，并记录公网链路指标。
+- k6 阈值写在脚本中，任何一项超标会非零退出。
+- 夹具由脚本创建并清理；本次 teardown 204，通过后没有残留性能知识库。
+- 这是单机 Docker Desktop 的小规模发布门槛，不是生产容量或 100 VU 声明。
+- 公网、TLS 终止、外部模型与跨主机数据库需在目标部署环境单独测量。

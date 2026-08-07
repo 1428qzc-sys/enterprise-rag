@@ -7,6 +7,7 @@ chunk 元数据里，用于问答时的精确溯源（例如「PDF 第 3 页」�
 from __future__ import annotations
 
 import os
+import zipfile
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -22,7 +23,57 @@ class Section:
     extra: dict = field(default_factory=dict)
 
 
-SUPPORTED_EXTS = {".pdf", ".docx", ".xlsx", ".xls", ".md", ".markdown", ".txt", ".csv", ".htm", ".html"}
+SUPPORTED_EXTS = {".pdf", ".docx", ".xlsx", ".md", ".markdown", ".txt", ".csv", ".htm", ".html"}
+
+CANONICAL_MIME = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".htm": "text/html",
+    ".html": "text/html",
+}
+
+
+def validate_file_content(path: str, filename: str) -> str:
+    """校验扩展名与文件结构，返回可信的规范 MIME。"""
+
+    ext = os.path.splitext(filename.lower())[1]
+    if ext not in SUPPORTED_EXTS:
+        raise ValueError(f"不支持的文件类型：{ext or '未知'}")
+    with open(path, "rb") as source:
+        head = source.read(8192)
+    if not head:
+        raise ValueError("文件为空")
+    if ext == ".pdf" and not head.startswith(b"%PDF-"):
+        raise ValueError("PDF 文件头无效")
+    if ext in {".docx", ".xlsx"}:
+        if not zipfile.is_zipfile(path):
+            raise ValueError(f"{ext[1:].upper()} 文件结构无效")
+        required = "word/document.xml" if ext == ".docx" else "xl/workbook.xml"
+        with zipfile.ZipFile(path) as archive:
+            if required not in archive.namelist():
+                raise ValueError(f"{ext[1:].upper()} 缺少必需内容")
+    if ext in {".md", ".markdown", ".txt", ".csv", ".htm", ".html"}:
+        if b"\x00" in head:
+            raise ValueError("文本文件包含二进制内容")
+        if not any(
+            _can_decode(head, encoding)
+            for encoding in ("utf-8", "utf-8-sig", "gbk", "latin-1")
+        ):
+            raise ValueError("文本文件编码无法识别")
+    return CANONICAL_MIME[ext]
+
+
+def _can_decode(raw: bytes, encoding: str) -> bool:
+    try:
+        raw.decode(encoding)
+        return True
+    except UnicodeDecodeError:
+        return False
 
 
 def detect_type(filename: str) -> str:
@@ -31,7 +82,7 @@ def detect_type(filename: str) -> str:
         return "pdf"
     if ext == ".docx":
         return "docx"
-    if ext in (".xlsx", ".xls"):
+    if ext == ".xlsx":
         return "xlsx"
     if ext in (".htm", ".html"):
         return "html"

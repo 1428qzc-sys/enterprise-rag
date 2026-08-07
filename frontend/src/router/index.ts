@@ -9,6 +9,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import("@/views/Documents.vue"),
   },
   { path: "/kb/:id/chat", name: "chat", component: () => import("@/views/Chat.vue") },
+  { path: "/admin", name: "admin", component: () => import("@/views/Admin.vue") },
+  { path: "/:pathMatch(.*)*", redirect: "/" },
 ];
 
 export default createRouter({

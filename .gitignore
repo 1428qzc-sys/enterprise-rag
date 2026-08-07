@@ -26,6 +26,10 @@ uploads/
 node_modules/
 dist/
 .vite/
+frontend/playwright-report/
+frontend/test-results/
+.playwright-cli/
+output/
 
 # ---- 编辑器 / 系统 ----
 .idea/

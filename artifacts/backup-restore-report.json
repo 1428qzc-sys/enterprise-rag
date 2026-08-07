@@ -1,0 +1,71 @@
+{
+  "started_at": "2026-07-20T01:33:34.409545+00:00",
+  "status": "passed",
+  "ports": {
+    "source_backend": "http://127.0.0.1:19021",
+    "source_qdrant": "http://127.0.0.1:19022",
+    "restore_qdrant": 19025,
+    "restore_backend": 19026
+  },
+  "restore_database": "enterprise_rag_restore_f43687b4",
+  "source_stack": {
+    "compose_project": "enterprise-rag-rc",
+    "backend_image": "enterprise-rag-rc-backend",
+    "qdrant_image": "qdrant/qdrant:v1.18.2"
+  },
+  "steps": {
+    "seed": {
+      "kb_id": "ddc509f03f0d47ce839df8f979b643d0",
+      "document_id": "e1c9650a7f1442fe856bf7606c010ff1",
+      "active_version_id": "f118a66e351b4d8ab49b5e721f32975c",
+      "collection": "kb_ddc509f03f0d47ce839df8f979b643d0",
+      "active_chunks": 1,
+      "source_retrieval": "verified"
+    },
+    "backup": {
+      "postgres": {
+        "format": "custom",
+        "bytes": 61802,
+        "sha256": "0869d88398d72cfa2301eefbe4759ff7d196568edbbe713eb898a1387837e74f",
+        "catalog_verified": true
+      },
+      "qdrant": {
+        "snapshot_name": "kb_ddc509f03f0d47ce839df8f979b643d0-3709747051424682-2026-07-20-01-33-41.snapshot",
+        "bytes": 147456,
+        "sha256": "6046d9c7aa517a9764acbbe09755b0d4875dc074e3d56b34bafc81eb69ad1b37",
+        "source_image": "qdrant/qdrant:v1.18.2"
+      },
+      "uploads": {
+        "bytes": 1267,
+        "sha256": "98750d842bf51dd13d25bbb8dd3ff56a188af5db86f1776356c5b2b3403f5b15",
+        "document_sha256": "fd359e66aa67ed64b954a5d673c467c7110c0fae593477e8b2073c93e5ccb00a"
+      }
+    },
+    "restore": {
+      "postgres": {
+        "knowledge_bases": 1,
+        "documents": 1,
+        "active_chunks": 1,
+        "database": "isolated"
+      },
+      "qdrant": {
+        "image": "qdrant/qdrant:v1.18.2",
+        "points": 1,
+        "priority": "snapshot"
+      },
+      "uploads": {
+        "sha256_verified": true
+      },
+      "backend": {
+        "readiness": "ready",
+        "login": 200,
+        "knowledge_base": 200,
+        "document": 200,
+        "retrieval_fact": "18 天",
+        "chat_citation": "verified"
+      }
+    }
+  },
+  "duration_seconds": 95.188,
+  "finished_at": "2026-07-20T01:35:09.590964+00:00"
+}

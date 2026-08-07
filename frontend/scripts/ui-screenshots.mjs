@@ -2,17 +2,14 @@ import { chromium } from "playwright";
 import { mkdirSync } from "fs";
 import { join } from "path";
 
-const BASE = process.env.ERAG_UI_BASE || "http://127.0.0.1:5175";
-const OUT_REFRESH = join(process.cwd(), "..", "docs", "ui-refresh");
-const OUT_OPT = join(process.cwd(), "..", "_optimization-screenshots", "enterprise-rag");
-mkdirSync(OUT_REFRESH, { recursive: true });
-mkdirSync(OUT_OPT, { recursive: true });
+const BASE = process.env.ERAG_UI_BASE || "http://127.0.0.1:19020";
+const OUT = join(process.cwd(), "..", "docs", "screenshots");
+mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch({ headless: true });
 
 async function shot(page, name) {
-  await page.screenshot({ path: join(OUT_REFRESH, name), fullPage: true });
-  await page.screenshot({ path: join(OUT_OPT, name), fullPage: true });
+  await page.screenshot({ path: join(OUT, name), fullPage: true });
 }
 
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -22,6 +19,7 @@ try {
   await page.goto(BASE, { waitUntil: "networkidle", timeout: 30000 });
   await shot(page, "01-login-light-after.png");
 
+  await page.locator("#login-tenant").fill("demo");
   await page.locator('input[autocomplete="username"]').fill("admin@example.com");
   await page.locator('input[type="password"]').fill("ChangeMe123!");
   await page.locator("button.auth-submit").click();
@@ -55,7 +53,7 @@ try {
     await shot(page, "06-chat-citations-after.png");
   }
 
-  console.log(JSON.stringify({ ok: true, outRefresh: OUT_REFRESH, outOpt: OUT_OPT, base: BASE }));
+  console.log(JSON.stringify({ ok: true, out: OUT, base: BASE }));
 } catch (err) {
   console.error(err);
   await shot(page, "99-error.png").catch(() => {});

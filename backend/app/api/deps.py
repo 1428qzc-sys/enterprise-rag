@@ -6,11 +6,11 @@ from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from ..audit import record_audit
 from ..database import get_session
-from ..models import KnowledgeBase, Tenant, User
+from ..models import KnowledgeBase, Role, Tenant, User, UserRole
 from ..security import Principal, decode_access_token, permissions_for_user
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -52,6 +52,19 @@ def get_current_principal(
             detail="账号不存在或已停用",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if payload.get("tenant_id") != user.tenant_id:
+        record_audit(
+            "auth.tenant_claim_mismatch",
+            "denied",
+            request=request,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登录凭证租户已失效",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     tenant = session.get(Tenant, user.tenant_id)
     if tenant is None or not tenant.is_active:
         record_audit(
@@ -63,7 +76,18 @@ def get_current_principal(
         )
         raise HTTPException(status_code=403, detail="租户不存在或已停用")
 
-    return Principal(user=user, tenant=tenant, permissions=permissions_for_user(session, user))
+    roles = session.exec(
+        select(Role)
+        .join(UserRole, UserRole.role_id == Role.id)
+        .where(UserRole.user_id == user.id, Role.tenant_id == user.tenant_id)
+        .order_by(Role.name)
+    ).all()
+    return Principal(
+        user=user,
+        tenant=tenant,
+        permissions=permissions_for_user(session, user),
+        roles=tuple(roles),
+    )
 
 
 def require_permission(permission: str) -> Callable:
@@ -86,7 +110,7 @@ def require_permission(permission: str) -> Callable:
 
 
 def can_access_kb(principal: Principal, kb: KnowledgeBase) -> bool:
-    return principal.user.is_superuser or kb.tenant_id == principal.tenant_id
+    return kb.tenant_id == principal.tenant_id
 
 
 def get_kb_or_404(

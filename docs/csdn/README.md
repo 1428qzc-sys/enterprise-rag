@@ -1,19 +1,3 @@
-# GitHub Repository Topics
+# 历史发布材料
 
-Sync to GitHub (requires `gh auth`):
-
-```bash
-gh repo edit Hou-mingyuan/enterprise-rag \
-  --add-topic rag \
-  --add-topic retrieval-augmented-generation \
-  --add-topic knowledge-base \
-  --add-topic fastapi \
-  --add-topic vue3 \
-  --add-topic qdrant \
-  --add-topic hybrid-search \
-  --add-topic multi-tenant \
-  --add-topic docker-compose \
-  --add-topic sse
-```
-
-CSDN 正文见 [enterprise-rag.md](./enterprise-rag.md)。
+本目录不再维护仓库 topics 或对外宣传稿；这类外部操作未经授权也不会执行。当前产品事实以 [README](../../README.md) 和可复现验收证据为准。

@@ -1,3 +1,3 @@
 """Enterprise RAG 后端应用包。"""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0-rc.1"

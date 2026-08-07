@@ -13,7 +13,10 @@ ADMIN_PASSWORD = "ChangeMe123!"
 
 
 def _login(client, email=ADMIN_EMAIL, password=ADMIN_PASSWORD):
-    resp = client.post("/api/auth/login", json={"email": email, "password": password})
+    resp = client.post(
+        "/api/auth/login",
+        json={"tenant_slug": "demo", "email": email, "password": password},
+    )
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -85,3 +88,39 @@ def test_security_headers_are_returned(client):
     assert resp.headers["Referrer-Policy"] == "no-referrer"
     assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
     assert "camera=()" in resp.headers["Permissions-Policy"]
+
+
+@pytest.mark.parametrize(
+    "filename,content,mime",
+    [
+        ("fake.pdf", b"not a pdf", "application/pdf"),
+        ("fake.docx", b"not a zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("fake.xlsx", b"PK" + bytes([3, 4]) + b"broken", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ("binary.txt", b"text" + bytes([0]) + b"binary", "text/plain"),
+    ],
+)
+def test_upload_rejects_extension_content_mismatch(client, filename, content, mime):
+    kb_id = _create_kb(client, f"文件校验-{filename}")
+    response = client.post(
+        f"/api/knowledge-bases/{kb_id}/documents/upload",
+        files={"file": (filename, content, mime)},
+        headers=_auth_headers(client),
+    )
+    assert response.status_code == 400
+
+
+def test_upload_size_limit_is_enforced_while_streaming(client, monkeypatch):
+    from app.api import documents as documents_api
+
+    kb_id = _create_kb(client, "上传大小限制")
+    staging_dir = documents_api.Path(documents_api.settings.upload_dir, ".staging")
+    before = set(staging_dir.glob("*")) if staging_dir.exists() else set()
+    monkeypatch.setattr(documents_api.settings, "max_upload_mb", 0)
+    response = client.post(
+        f"/api/knowledge-bases/{kb_id}/documents/upload",
+        files={"file": ("large.txt", b"x", "text/plain")},
+        headers=_auth_headers(client),
+    )
+    assert response.status_code == 413
+    after = set(staging_dir.glob("*")) if staging_dir.exists() else set()
+    assert after == before

@@ -1,198 +1,199 @@
 # Enterprise RAG 运行手册
 
-运维入口与部署拓扑见 [DEPLOYMENT.md](DEPLOYMENT.md)；公网 HTTPS 验收证据模板见 [DEPLOYMENT.md §8](DEPLOYMENT.md#8-公网-https-部署证据验收模板)。
+适用版本：`1.0.0-rc.1`。本文以仓库根目录的 Docker Compose 单机拓扑为准；生产环境的 TLS、托管数据库、集中日志和告警由部署平台负责。
 
-## 边缘代理（HTTPS）
-
-| 组件 | 参考 |
-| --- | --- |
-| Nginx TLS 终止 | [DEPLOYMENT.md §4](DEPLOYMENT.md#4-https--反向代理) |
-| Caddy 自动 HTTPS | [`deploy/Caddyfile.example`](deploy/Caddyfile.example) |
-| 前端容器内反代 | [`frontend/nginx.conf`](frontend/nginx.conf)（仅 HTTP，生产 TLS 在边缘） |
-
-SSE 流式问答要求边缘层关闭响应缓冲（见 Caddy `flush_interval` / Nginx `proxy_buffering off`）。
-
-## 证书续期
-
-- **Caddy**：默认自动续期；检查 `docker logs caddy` 无 ACME 错误。
-- **Certbot + Nginx**：`certbot renew --dry-run` 通过后加入 cron；续期后 `nginx -s reload`。
-- **云 LB 证书**：在控制台跟踪到期告警；轮换后复跑 [DEPLOYMENT §8.2–8.3](DEPLOYMENT.md#82-tls-与证书链) smoke。
-
-## 日常检查
+## 日常状态检查
 
 ```bash
 docker compose ps
-curl -f http://127.0.0.1:${BACKEND_HOST_PORT:-8000}/api/health
+curl -fsS http://127.0.0.1:19021/api/health/live
+curl -fsS http://127.0.0.1:19021/api/health/ready
+```
+
+- `/api/health/live` 只证明应用进程能响应。
+- `/api/health/ready` 实际检查 PostgreSQL、向量库、Embedding、LLM；使用 Redis 限流时也检查 Redis。任一必需组件失败会返回 HTTP 503，并在 `failed_components` 中列出组件名。
+- `/api/health` 返回版本、环境、provider 与 `mode=mock|model`，不访问外部依赖。
+- Compose 的 frontend 只会在 backend readiness 成功后启动并变为 healthy。
+
+检查当前数据库迁移：
+
+```bash
+docker compose exec -T backend alembic current
+docker compose exec -T backend alembic heads
+```
+
+## 日志与请求关联
+
+```bash
 docker compose logs --tail=200 backend
+docker compose logs --since=10m backend
 ```
 
-关键健康信号：
+后端输出单行 JSON，字段包括 `timestamp`、`level`、`event`、`request_id`、路由模板、状态码与耗时。日志不会记录请求体、完整 Prompt、文档正文、Bearer Token 或原始邮箱。
 
-- backend 容器 `healthy`
-- PostgreSQL 可连接
-- Qdrant 可连接
-- `/api/health` 返回 `status=ok`
-- 登录 `/api/auth/login` 成功
-- `/api/admin/audit-logs` 可查看登录、建库、上传、检索、问答和拒绝事件
+客户端可以发送最多 128 字符的 `X-Request-ID`；合法值会在响应头回传，否则服务端生成新 ID。排障时以该 ID 关联 HTTP、入库与检索日志。
 
-## 备份
+Prometheus 指标：
 
-PostgreSQL：
+```text
+GET http://127.0.0.1:19021/metrics
+```
+
+关键指标：
+
+- `enterprise_rag_http_requests_total`
+- `enterprise_rag_http_request_duration_seconds`
+- `enterprise_rag_http_requests_in_progress`
+- `enterprise_rag_retrieval_requests_total`
+- `enterprise_rag_retrieval_stage_duration_seconds{stage="vector|bm25|fusion|rerank"}`
+
+建议告警起点：readiness 连续 3 次失败；5xx 比例连续 5 分钟高于 2%；检索 degraded 持续增加；读接口 p95 超过 300ms；写接口 p95 超过 800ms。目标环境应根据实际容量重新校准。
+
+## 超时和故障策略
+
+| 组件 | 默认控制 | 失败表现 | 处理原则 |
+| --- | --- | --- | --- |
+| HTTP 请求 | `REQUEST_TIMEOUT_SECONDS=60` | HTTP 504，带 request ID | 查同 ID 日志，判断入库、模型或存储阶段，不盲目重放删除请求 |
+| PostgreSQL 连接池 | `DB_POOL_TIMEOUT_SECONDS=30` | readiness 503 或请求 5xx | 检查连接数、锁和磁盘；恢复前停止扩容写流量 |
+| readiness 外部检查 | `READINESS_TIMEOUT_SECONDS=2` | 对应组件 `status=error` | 只缩短探针，不会改变业务调用超时 |
+| Qdrant | 客户端健康和维度检查 | readiness 503；检索可降级到 BM25，入库会失败/重试 | 恢复 Qdrant 后执行文档对账，禁止直接手工改向量数量 |
+| Redis | `fail_closed`（Compose 默认） | 限流依赖不可用时 HTTP 503 | 先恢复 Redis；只有明确接受失去分布式限流时才临时改 `fail_open` |
+| Embedding | provider 自身超时 | 新版本失败，旧活动版本保留 | 修复 provider 后从文档任务重试；不要删除旧版本 |
+| LLM | provider 自身超时 + HTTP 总超时 | SSE `error` 或请求失败 | 同一 `request_id` 可重试；前端只自动重连一次 |
+| URL 抓取 | `10s`、最多 3 次重定向、5 MiB | 入库失败并记录原因 | 核对公网 DNS、响应大小和 SSRF 拒绝日志 |
+
+`HEALTH_EXTERNAL_CHECKS=false` 只适合外部 provider 不允许探测 `/models` 的受控环境；关闭后 readiness 不能证明真实模型可调用，必须另设供应商探针。
+
+## 文档与向量一致性
+
+每个文档版本有独立的 `DocumentVersion`、`IngestionJob` 和 Chunk。正常切换顺序：
+
+1. 解析并生成暂存 Chunk。
+2. 向当前 revision collection 写入带 `tenant_id/document_id/version_id` 的向量。
+3. 在数据库事务中激活新版本和 Chunk。
+4. 清理旧版本向量；清理失败则进入 `pending_cleanup`，活动版本仍可用。
+
+常见状态：
+
+- `consistent`：活动数据库 Chunk 数与活动版本向量数一致，旧版本向量已清理。
+- `pending_cleanup`：新版本已生效，但旧向量清理待重试。
+- `inconsistent` / failed：对账或入库失败，查看任务错误再处理。
+
+优先在文档详情页点击“数据对账”。API 等价操作：
+
+```text
+POST /api/knowledge-bases/{kb_id}/documents/{document_id}/reconcile
+GET  /api/knowledge-bases/{kb_id}/documents/{document_id}/jobs
+```
+
+模型或维度变化必须使用知识库重建 API/UI。系统会在新 revision collection 构建完整后原子切换；切换前失败时旧 collection 保持活动。不要直接修改数据库中的 `embedding_dim` 或 collection 名称。
+
+## 迁移
+
+容器启动命令会在启动 Uvicorn 前执行：
 
 ```bash
-docker compose exec postgres pg_dump -U rag enterprise_rag > backup.sql
+alembic upgrade head
 ```
 
-Qdrant：
+发布前必须先备份三类持久数据，并在隔离副本演练迁移。查看 SQL：
 
 ```bash
-curl -X POST http://localhost:${QDRANT_HOST_PORT:-6333}/collections/<collection>/snapshots
+docker compose exec -T backend alembic history
+docker compose exec -T backend alembic upgrade head --sql
 ```
 
-上传文件：
+`alembic downgrade` 仅用于隔离恢复副本或已确认可逆的变更。生产回滚优先恢复发布前一致时间点的 PostgreSQL、Qdrant 和上传文件，不允许只回滚数据库而保留新向量。
 
-```bash
-tar -czf uploads.tar.gz backend/data/uploads
+当前迁移往返自动测试会执行 `upgrade head → downgrade base → upgrade head`，并验证旧文档回填为 v1 与租户内邮箱唯一约束。
+
+## 备份与恢复
+
+必须把以下三类数据作为同一恢复点保存：
+
+1. PostgreSQL custom-format dump。
+2. 每个活动 Qdrant collection 的 snapshot。
+3. backend `ragdata` 卷中的 `/app/data/uploads`。
+
+恢复顺序：停止写入 → 恢复 PostgreSQL → 恢复相同小版本 Qdrant snapshot → 恢复 uploads → 启动 backend → readiness → 登录/原文/检索/引用验收。
+
+Qdrant collection snapshot 需要用与源端相同的 minor 版本恢复；脚本会从源 Compose 容器读取精确镜像，并以 `priority=snapshot` 上传到新的空 Qdrant。不要把不同时间点的数据库、snapshot 和 uploads 混用。
+
+### 自动恢复演练
+
+先在宿主机准备 Python 3.11 开发环境：
+
+```bat
+cd backend
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+cd ..
 ```
 
-## 恢复
+标准项目名启动时：
 
-1. 停止写入流量。
-2. 恢复 PostgreSQL dump。
-3. 恢复 Qdrant snapshot。
-4. 恢复上传目录。
-5. 重启 backend。
-6. 执行建库列表、文档列表、检索、问答 smoke。
+```bat
+backend\.venv\Scripts\python.exe backend\scripts\backup_restore_drill.py
+```
+
+自定义 Compose 项目示例：
+
+```bat
+backend\.venv\Scripts\python.exe backend\scripts\backup_restore_drill.py --compose-project enterprise-rag-rc --compose-env-file .env.example
+```
+
+脚本只使用 `19025` 和 `19026` 启动隔离恢复服务，真实完成以下检查：
+
+- PostgreSQL dump catalog 可读，恢复后的知识库、文档、活动 Chunk 数一致。
+- Qdrant snapshot SHA-256 可记录，恢复后的 point 数和 `document_id` payload 一致。
+- uploads 归档解压路径安全，原文件 SHA-256 与数据库 `content_hash` 一致。
+- 恢复后端 readiness、登录、知识库、文档、原文 Chunk、混合检索、问答和引用全部通过。
+- 无论成功或失败，都删除临时容器、隔离数据库、源夹具和源 snapshot；原始备份只存在系统临时目录。
+
+报告默认写入 `artifacts/backup-restore-report.json`，不包含密码或 Token。该脚本是恢复能力演练，不替代长期备份保留策略。
 
 ## 常见故障
 
-| 现象 | 判断 | 处理 |
-| --- | --- | --- |
-| 登录失败 | 管理员密码错误或账号停用 | 用数据库后台重置密码哈希，或重新设置引导账号后迁移 |
-| 文档一直处理中 | 解析/Embedding 失败 | 查看 backend 日志与 Document.error |
-| 问答超时 | LLM 网关慢或不可用 | 检查 LLM_BASE_URL、超时、供应商状态 |
-| URL 入库被拒绝 | SSRF 防护命中 | 确认目标不是 localhost、内网、链路本地、metadata endpoint，且重定向后仍是公网 |
-| 429 请求过频 | 应用限流命中 | 检查调用方重试策略，必要时提高 `RATE_LIMIT_REQUESTS_PER_MINUTE` 或迁移到网关/Redis 限流 |
-| 检索无结果 | 文档未入库或向量库异常 | 查看文档状态、Qdrant collection、BM25 索引 |
-| 跨租户数据异常 | 重要安全事件 | 立即下线服务，保留日志，核查 tenant_id 过滤与测试 |
-
-## 发布回滚
-
-### 发布前
-
-1. 标记镜像：`backend:git-<sha>`、`frontend:git-<sha>`。
-2. 备份 PostgreSQL、Qdrant snapshot、上传目录（见下文「备份」）。
-3. `alembic upgrade head` 仅在 forward 迁移已 review 后执行。
-
-### 回滚步骤
-
-1. **切流量**：LB/Nginx 指向上一版 compose stack 或 K8s ReplicaSet revision。
-2. **降镜像**：`docker compose pull` 上一 digest 或 `kubectl rollout undo deployment/backend`。
-3. **数据库**：若本次发布含破坏性迁移，恢复发布前 `pg_dump`；否则仅回滚应用层。
-4. **向量库**：必要时从 Qdrant snapshot 恢复对应 collection。
-5. **验证**：按 [DEPLOYMENT §8.3](DEPLOYMENT.md#83-经-https-的应用-smoke) 跑 HTTPS smoke；检查审计日志无异常洪峰。
-
-### 回滚后 30 分钟观察
-
-- `/api/health` 连续 green
-- 5xx 率（见「监控占位」）不升高
-- 登录 / 检索 / 问答抽样通过
-
-## 监控占位
-
-生产环境接入集中监控时，建议至少覆盖：
-
-| 信号 | 占位 / 建议 |
-| --- | --- |
-| **可用性** | Uptime 探测 `GET https://<domain>/api/health`（60s） |
-| **延迟** | P95 `POST /api/chat` 与 SSE TTFB |
-| **错误率** | FastAPI 5xx、Nginx/Caddy 502/504 |
-| **资源** | backend CPU/内存、PostgreSQL 连接数、Qdrant 磁盘 |
-| **安全** | 429 限流命中、审计日志 `denied` / SSRF 拒绝计数 |
-| **证书** | TLS `notAfter` 距今天数 < 14 告警 |
-
-## 监控占位
-
-生产环境接入集中监控时，建议至少覆盖：
-
-| 信号 | 占位 / 建议 |
-| --- | --- |
-| **可用性** | Uptime 探测 `GET https://<domain>/api/health`（60s） |
-| **延迟** | P95 `POST /api/chat` 与 SSE TTFB |
-| **错误率** | FastAPI 5xx、Nginx/Caddy 502/504 |
-| **资源** | backend CPU/内存、PostgreSQL 连接数、Qdrant 磁盘 |
-| **安全** | 429 限流命中、审计日志 `denied` / SSRF 拒绝计数 |
-| **证书** | TLS `notAfter` 距今天数 < 14 告警 |
-
-### Prometheus + Grafana（占位配置）
-
-`prometheus.yml` 片段：
-
-```yaml
-scrape_configs:
-  - job_name: enterprise-rag
-    metrics_path: /metrics          # 若启用 Prometheus 导出
-    static_configs:
-      - targets: ['backend:8000']
-  - job_name: enterprise-rag-blackbox
-    metrics_path: /probe
-    params:
-      module: [http_2xx]
-    static_configs:
-      - targets: ['https://rag.example.com/api/health']
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - target_label: __address__
-        replacement: blackbox-exporter:9115
-```
-
-Grafana 面板占位（Dashboard 行）：
-
-| Panel | 查询 / 说明 |
-| --- | --- |
-| Availability | `probe_success{job="enterprise-rag-blackbox"}` |
-| API latency P95 | histogram from reverse proxy or APM |
-| 5xx rate | nginx/caddy `status=~"5.."` |
-| PG connections | `pg_stat_activity_count` 或云 RDS 指标 |
-| Qdrant disk | 节点磁盘使用率 |
-| Audit denied | 日志聚合 `action=denied` 计数 |
-
-### 无 Prometheus 时的 healthcheck 轮询
+### 栈长期不 healthy
 
 ```bash
-# cron 每 5 分钟；失败时 webhook / 邮件（替换 URL 与告警脚本）
-*/5 * * * * curl -fsS --max-time 10 https://rag.example.com/api/health >/dev/null \
-  || echo "enterprise-rag health FAIL $(date -Iseconds)" | mail -s alert ops@example.com
+docker compose ps
+docker compose logs --tail=300 postgres qdrant redis backend frontend
 ```
 
-Docker Compose 内置 healthcheck 仅覆盖容器内进程；**公网路径**仍需边缘探测（见上表）。
+先看第一个失败的依赖。backend 会等待三项基础服务健康，并在数据库迁移成功后才启动。首次启动还会预热中文 BM25 词典，完成前 readiness 不会成功。
 
-日志聚合占位：JSON stdout（`SPRING_PROFILES_ACTIVE=json` 等价 profile）→ Loki / ELK / CloudWatch。
+### HTTP 429 或 503
 
-## 备份恢复演练 checklist
+- 429：租户配额已用完；匿名请求按 IP 计数。检查 `RATE_LIMIT_REQUESTS_PER_MINUTE` 与 Redis key，而不是绕过鉴权。
+- 503 且正文提示限流依赖：默认 `fail_closed` 下 Redis 不可用，恢复 Redis。
+- 503 readiness：查看 `failed_components`，按组件排障。
 
-建议**每季度**在 staging 执行一次完整演练，并在变更单归档证据（文件名 + 日期）：
+### 新版本失败
 
-| 步骤 | 操作 | 通过标准 |
-| --- | --- | --- |
-| 1 | `pg_dump` 全库 + Qdrant snapshot + `uploads.tar.gz` | 三类备份文件大小 > 0，带时间戳 |
-| 2 | 新建空白 staging 栈（或停写隔离库） | compose / K8s 栈 healthy |
-| 3 | 恢复 PostgreSQL dump | `alembic current` 与预期一致 |
-| 4 | 恢复 Qdrant snapshot | collection 文档数与备份前一致 |
-| 5 | 恢复 uploads 目录 | 随机抽样文件可下载 |
-| 6 | 重启 backend，跑 smoke | 登录 → 建库列表 → 文档列表 → 检索 → 问答 |
-| 7 | 记录 RTO/RPO | 自停写到 smoke 通过的耗时；数据丢失窗口说明 |
+旧活动版本设计上仍然可检索。查看文档的任务阶段、尝试次数和错误；修复依赖后使用“重试”，不要重复上传相同文件制造额外任务。相同 SHA-256 内容会被判为重复而不生成向量。
 
-演练失败时：保留失败日志，**不要**在未复盘前覆盖生产备份。
+### 引用跳转不到原文
 
-## 发布检查清单
+记录 chat 响应的 request ID、`source.chunk_id`、`document_id`、`version_id` 和页码。确认该 Chunk 属于当前租户、当前知识库和活动版本。若数据库 Chunk 存在但向量计数不一致，执行文档对账；禁止手工改引用编号。
 
-- [ ] `python -m pytest`
-- [ ] `alembic heads` / `alembic upgrade head`
-- [ ] `npm audit --audit-level=high`
-- [ ] `npm run type-check`
-- [ ] `npm run build`
-- [ ] `docker compose --env-file .env.production up -d --build`
-- [ ] 公网 HTTPS smoke（[DEPLOYMENT §8](DEPLOYMENT.md#8-公网-https-部署证据验收模板)）
-- [ ] 登录、建库、上传、检索、问答、跨租户越权测试
+### 跨租户数据疑似可见
+
+按 P0 安全事件处理：停止外部流量，保留结构化日志和数据库快照，记录主体 tenant claim、路由和对象 ID；不要删除证据。复现前不要改变租户数据。当前 API 对其他租户对象统一返回 404，权限不足返回 403。
+
+## 发布前最小门禁
+
+```text
+backend pytest（覆盖率门槛 75%）
+frontend npm audit / lint / test / type-check / build
+docker compose config
+release_smoke.py
+固定 31 题 evaluate.py
+k6 固定 fixture
+迁移往返测试
+backup_restore_drill.py
+secret scan
+git diff --check
+```
+
+生产发布还必须在目标环境验证 TLS、集中日志、告警、实际 provider、容量和恢复点保留；本仓库不会把本地 Mock 结果描述为这些外部项已通过。

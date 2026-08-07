@@ -19,7 +19,21 @@ import httpx
 
 from ..config import settings
 
-_TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
+_LATIN_TOKEN_RE = re.compile(r"[a-z0-9_]+", re.IGNORECASE)
+_CHINESE_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+
+
+def _hash_tokens(text: str) -> List[str]:
+    normalized = text.lower()
+    tokens = _LATIN_TOKEN_RE.findall(normalized)
+    for run in _CHINESE_RUN_RE.findall(normalized):
+        if len(run) == 1:
+            tokens.append(run)
+            continue
+        tokens.extend(run[index : index + 2] for index in range(len(run) - 1))
+        if len(run) >= 3:
+            tokens.extend(run[index : index + 3] for index in range(len(run) - 2))
+    return tokens
 
 
 class BaseEmbeddings(ABC):
@@ -81,7 +95,7 @@ class FakeEmbeddings(BaseEmbeddings):
 
     def _embed_one(self, text: str) -> List[float]:
         vec = [0.0] * self.dim
-        for tok in _TOKEN_RE.findall(text.lower()):
+        for tok in _hash_tokens(text):
             h = int(hashlib.md5(tok.encode("utf-8")).hexdigest(), 16)
             idx = h % self.dim
             sign = 1.0 if (h >> 8) % 2 == 0 else -1.0

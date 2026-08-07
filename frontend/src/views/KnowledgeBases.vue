@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { kbApi } from "@/api/client";
+import { ArrowRight, Blocks, FileText, Library, Plus, Trash2, X } from "@lucide/vue";
+import { apiErrorMessage, kbApi } from "@/api/client";
 import { useKbStore } from "@/stores/kb";
+import { useAuthStore } from "@/stores/auth";
 import { useToast } from "@/composables/toast";
 
 const store = useKbStore();
+const auth = useAuthStore();
 const router = useRouter();
 const { show } = useToast();
 
@@ -13,8 +16,20 @@ const showModal = ref(false);
 const name = ref("");
 const description = ref("");
 const creating = ref(false);
+const deletingId = ref("");
+const nameInput = ref<HTMLInputElement | null>(null);
 
 onMounted(() => store.refresh());
+
+async function openCreateDialog() {
+  showModal.value = true;
+  await nextTick();
+  nameInput.value?.focus();
+}
+
+function closeCreateDialog() {
+  if (!creating.value) showModal.value = false;
+}
 
 async function create() {
   if (!name.value.trim()) return;
@@ -27,8 +42,8 @@ async function create() {
     await store.refresh();
     show("知识库已创建");
     router.push(`/kb/${kb.id}/documents`);
-  } catch (e: any) {
-    show(e?.response?.data?.detail || "创建失败");
+  } catch (error: unknown) {
+    show(apiErrorMessage(error, "创建失败"));
   } finally {
     creating.value = false;
   }
@@ -37,9 +52,16 @@ async function create() {
 async function remove(id: string, kbName: string, ev: Event) {
   ev.stopPropagation();
   if (!confirm(`确认删除知识库「${kbName}」？其文档、向量与对话都会被清除。`)) return;
-  await kbApi.remove(id);
-  await store.refresh();
-  show("已删除");
+  deletingId.value = id;
+  try {
+    await kbApi.remove(id);
+    await store.refresh();
+    show("知识库已删除");
+  } catch (error: unknown) {
+    show(apiErrorMessage(error, "知识库删除失败"));
+  } finally {
+    deletingId.value = "";
+  }
 }
 
 function fmt(d: string) {
@@ -54,6 +76,8 @@ const stats = computed(() => {
     chunkCount: list.reduce((n, k) => n + (k.chunk_count || 0), 0),
   };
 });
+const canWrite = computed(() => auth.can("kb:write"));
+const canDelete = computed(() => auth.can("kb:delete"));
 </script>
 
 <template>
@@ -63,9 +87,13 @@ const stats = computed(() => {
         <h1>工作台</h1>
         <p>创建并管理相互隔离的知识库，导入文档后即可进行检索增强问答。</p>
       </div>
-      <button class="btn primary" :disabled="store.loading" @click="showModal = true">
-        + 新建知识库
+      <button v-if="canWrite" class="btn primary" type="button" :disabled="store.loading" @click="openCreateDialog">
+        <Plus :size="16" aria-hidden="true" /> 新建知识库
       </button>
+    </div>
+
+    <div v-if="!canWrite" class="state-banner permission" role="status">
+      当前账号为只读权限：可以查看知识库、文档并进行问答，不能创建或修改知识库。
     </div>
 
     <div v-if="store.error" class="state-banner error">
@@ -75,16 +103,16 @@ const stats = computed(() => {
 
     <div v-if="!store.loading && store.kbs.length" class="dashboard-stats">
       <div class="card stat-card">
-        <span class="label">知识库</span>
-        <span class="value">{{ stats.kbCount }}</span>
+        <div class="stat-icon"><Library :size="17" aria-hidden="true" /></div>
+        <div><span class="label">知识库</span><span class="value">{{ stats.kbCount }}</span></div>
       </div>
       <div class="card stat-card">
-        <span class="label">文档总数</span>
-        <span class="value">{{ stats.docCount }}</span>
+        <div class="stat-icon"><FileText :size="17" aria-hidden="true" /></div>
+        <div><span class="label">文档总数</span><span class="value">{{ stats.docCount }}</span></div>
       </div>
       <div class="card stat-card">
-        <span class="label">向量片段</span>
-        <span class="value">{{ stats.chunkCount }}</span>
+        <div class="stat-icon"><Blocks :size="17" aria-hidden="true" /></div>
+        <div><span class="label">可检索片段</span><span class="value">{{ stats.chunkCount }}</span></div>
       </div>
     </div>
 
@@ -93,20 +121,38 @@ const stats = computed(() => {
     </div>
 
     <div v-else-if="store.kbs.length === 0 && !store.error" class="empty card" style="padding: var(--space-8)">
-      <div class="big">📚</div>
-      <p>还没有知识库，点击右上角「新建知识库」开始吧。</p>
+      <Library class="empty-icon" :size="34" aria-hidden="true" />
+      <h2>创建第一个知识库</h2>
+      <p>导入企业文档后，即可检索并进行带引用的问答。</p>
+      <button v-if="canWrite" class="btn primary" type="button" @click="openCreateDialog">
+        <Plus :size="16" aria-hidden="true" /> 新建知识库
+      </button>
     </div>
 
     <div v-else class="kb-grid">
-      <div
+      <article
         v-for="kb in store.kbs"
         :key="kb.id"
         class="card kb-card"
-        @click="router.push(`/kb/${kb.id}/chat`)"
       >
-        <div class="row" style="justify-content: space-between">
-          <h3>{{ kb.name }}</h3>
-          <button class="btn ghost sm" title="删除" @click="remove(kb.id, kb.name, $event)">🗑</button>
+        <div class="kb-card-head">
+          <div class="kb-symbol"><Library :size="18" aria-hidden="true" /></div>
+          <div class="kb-title">
+            <h3>{{ kb.name }}</h3>
+            <span>{{ kb.embedding_model }} · {{ kb.embedding_dim }}d</span>
+          </div>
+          <button
+            v-if="canDelete"
+            class="btn ghost sm icon-command danger-text"
+            type="button"
+            title="删除知识库"
+            :disabled="deletingId === kb.id"
+            @click="remove(kb.id, kb.name, $event)"
+          >
+            <span v-if="deletingId === kb.id" class="spin"></span>
+            <Trash2 v-else :size="15" aria-hidden="true" />
+            <span class="sr-only">删除 {{ kb.name }}</span>
+          </button>
         </div>
         <div class="desc">{{ kb.description || "暂无描述" }}</div>
         <div class="stats">
@@ -115,27 +161,117 @@ const stats = computed(() => {
           <span class="spacer" style="flex: 1"></span>
           <span>{{ fmt(kb.created_at) }}</span>
         </div>
-      </div>
+        <button class="kb-enter" type="button" @click="router.push(`/kb/${kb.id}/chat`)">
+          进入知识库 <ArrowRight :size="15" aria-hidden="true" />
+        </button>
+      </article>
     </div>
 
-    <div v-if="showModal" class="modal-mask" @click.self="showModal = false">
-      <div class="card modal">
-        <h3>新建知识库</h3>
-        <div class="field">
-          <label>名称</label>
-          <input v-model="name" class="input" placeholder="例如：员工手册知识库" @keyup.enter="create" />
+    <div v-if="showModal" class="modal-mask" @click.self="closeCreateDialog" @keydown.esc="closeCreateDialog">
+      <form class="card modal" role="dialog" aria-modal="true" aria-labelledby="create-kb-title" @submit.prevent="create">
+        <div class="modal-title-row">
+          <h3 id="create-kb-title">新建知识库</h3>
+          <button class="btn ghost sm icon-command" type="button" title="关闭" :disabled="creating" @click="closeCreateDialog">
+            <X :size="16" aria-hidden="true" /><span class="sr-only">关闭</span>
+          </button>
         </div>
         <div class="field">
-          <label>描述（可选）</label>
-          <textarea v-model="description" class="textarea" rows="3" placeholder="用途说明"></textarea>
+          <label for="kb-name">名称</label>
+          <input id="kb-name" ref="nameInput" v-model="name" class="input" maxlength="128" required placeholder="例如：员工手册知识库" />
+        </div>
+        <div class="field">
+          <label for="kb-description">描述（可选）</label>
+          <textarea id="kb-description" v-model="description" class="textarea" rows="3" placeholder="说明该知识库收录的资料与适用范围"></textarea>
         </div>
         <div class="modal-actions">
-          <button class="btn" @click="showModal = false">取消</button>
-          <button class="btn primary" :disabled="creating || !name.trim()" @click="create">
+          <button class="btn" type="button" :disabled="creating" @click="closeCreateDialog">取消</button>
+          <button class="btn primary" type="submit" :disabled="creating || !name.trim()">
             <span v-if="creating" class="spin"></span> 创建
           </button>
         </div>
-      </div>
+      </form>
     </div>
   </div>
 </template>
+
+<style scoped>
+.dashboard-stats .stat-card {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  align-items: center;
+}
+.stat-icon,
+.kb-symbol {
+  display: grid;
+  place-items: center;
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.stat-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.stat-card .label,
+.stat-card .value {
+  display: block;
+}
+.kb-card {
+  cursor: default;
+}
+.kb-card-head {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.kb-symbol {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+.kb-title {
+  min-width: 0;
+}
+.kb-title h3,
+.kb-title span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kb-title span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.kb-enter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: var(--primary-600);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.kb-enter:hover {
+  color: var(--primary);
+}
+.empty h2 {
+  margin: 8px 0 0;
+  color: var(--text);
+  font-size: 16px;
+}
+.empty p {
+  margin: 4px 0 16px;
+}
+.empty-icon {
+  color: var(--primary);
+}
+</style>

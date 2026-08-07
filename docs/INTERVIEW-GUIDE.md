@@ -1,61 +1,26 @@
-# Enterprise RAG · 面试速览
+# Enterprise RAG 技术速览
 
-> 架构图 + 3 问 3 答。完整技术细节见 [CSDN 长文](./csdn/enterprise-rag.md) 与 [README](../README.md)。
+适用版本：`1.0.0-rc.1`。本文不使用主观评分或宣传结论；细节与证据见 [架构说明](architecture.md)、[README](../README.md) 和 [验收索引](../DIMENSION-AUDIT.md)。
 
-## 系统架构
+## 三个核心问题
 
-```mermaid
-flowchart LR
-    subgraph 前端["前端 (Vue 3 + Vite)"]
-        UI[知识库 / 文档 / 问答]
-    end
-    subgraph 后端["后端 (FastAPI)"]
-        API[REST + SSE]
-        ING[入库：解析·分块·嵌入]
-        RET[混合检索：向量+BM25+RRF+重排]
-        RAG[RAG：记忆·改写·溯源]
-    end
-    subgraph 存储
-        PG[(PostgreSQL)]
-        QD[(Qdrant)]
-    end
-    subgraph 模型["可插拔提供方"]
-        EMB[Embedding]
-        LLM[LLM]
-    end
+### 为什么使用向量 + BM25 + RRF？
 
-    UI -->|HTTP/SSE| API
-    API --> ING --> EMB
-    ING --> PG & QD
-    API --> RAG --> RET
-    RET --> QD & PG & EMB
-    RAG --> LLM
+向量召回覆盖语义改写，BM25 覆盖术语、编号和专名；RRF 用名次融合，避免把两种不同量纲分数直接相加。可选 reranker 只对候选精排，执行状态和降级原因会进入 diagnostics。
+
+### 如何保证引用不是模型编造的？
+
+模型只看到编号上下文。服务端在保存前解析 `[n]`，检查编号范围并只保留实际引用来源；来源再绑定活动版本的数据库 Chunk、原文和页码。无可靠证据时不调用模型编造事实，而是返回“不知道”。
+
+### PostgreSQL 与 Qdrant 无法同事务时如何一致？
+
+新版本使用暂存 Chunk/向量，数据库激活失败会删除新向量并保留旧活动版本；激活后再清理旧向量。清理失败进入可重试对账状态。模型维度变更在新 collection 完整构建和计数核对后才切换。
+
+## 可复现入口
+
+```bash
+docker compose up -d --build --wait
+docker compose exec -T backend python scripts/release_smoke.py --base-url http://127.0.0.1:8000 --frontend-url http://frontend
 ```
 
-## 3 问 3 答
-
-**Q1：为什么 RAG 要混合检索，而不是只用向量？**  
-向量擅长语义相似，但对 rare token、法规编号、SKU 等精确匹配弱；BM25 补稀疏通道。RRF 融合两路排序，避免分数尺度不一致；可选 BGE 重排再压噪声进 Prompt。
-
-**Q2：如何降低幻觉、让业务方敢用？**  
-(1) 检索阈值 + 重排控制 chunk 质量；(2) Prompt 约束「仅依据参考文档」+ 编号引用 `[n]`；(3) SSE 先返回 `sources`，UI 展示原文片段与页码。关键场景仍建议人工复核 + 审计日志。
-
-**Q3：多租户隔离在数据层怎么落地？**  
-元数据表带 `tenant_id`，JWT 解析当前租户，所有查询带 tenant 过滤；向量侧按知识库独立 Qdrant collection。越权测试见 [MULTI_TENANCY.md](../MULTI_TENANCY.md) 与 pytest 用例。
-
-## 验收
-
-```powershell
-cd frontend
-npm run build
-# Playwright 截图（需栈运行）：node scripts/ui-screenshots.mjs
-```
-
-## 截图归档（面试速览）
-
-| 截图 | 说明 |
-| --- | --- |
-| [06-chat-citations-after.png](./ui-refresh/06-chat-citations-after.png) | 问答引用溯源 UI（Round-5 ui-refresh） |
-| [02-dashboard-light-after.png](./ui-refresh/02-dashboard-light-after.png) | 工作台统计卡 + 知识库网格 |
-
-完整产出见 [ui-refresh/README.md](./ui-refresh/README.md)。
+固定评估、性能、恢复与浏览器证据均有独立脚本；默认 fake/echo 只证明工程闭环，不证明真实模型泛化。
