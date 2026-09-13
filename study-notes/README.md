@@ -44,6 +44,7 @@
 
 ## 笔记索引
 
+- [Day 7 — Core 层深度解析](day07-core-layer.md)
 - [Day 6 — RAG 查询全链路深度解析](day06-rag-query-pipeline.md)
 
 ## 学习方法

@@ -1,5 +1,46 @@
 # 学习日志
 
+## Day 7 — 2026-09-13
+
+### 今日学习内容
+
+| 文件 | 核心知识点 | 掌握程度 |
+|------|-----------|---------|
+| `core/embeddings.py` | 文本向量化：策略模式 + 三 provider | ✅ 深度掌握 |
+| `core/vector_store.py` | 向量库封装：HNSW、余弦相似度、单例 | ✅ 深度掌握 |
+| `core/reranker.py` | RRF 融合 + Bi/Cross-Encoder 重排 | ✅ 深度掌握 |
+| `core/llm.py` | 大模型封装：流式输出 + 异步 | ✅ 深度掌握 |
+
+### 核心收获
+
+1. **HNSW 索引**：多层跳表，从粗到细定位，百万向量毫秒级检索
+2. **余弦相似度**：看方向不看长度，文本语义场景优于欧氏距离
+3. **Bi-Encoder vs Cross-Encoder**：先召回（各自编码）后精排（配对编码）
+4. **降级设计**：Rerank 挂了返回 applied=False 退回 RRF 排序，服务不崩
+5. **策略 + 工厂模式**：core 层四文件统一范式，换模型只改 .env 不改代码
+6. **流式输出 + 异步**：astream 逐 token 吐对接 SSE，async 扛高并发
+
+### 易错点纠正
+
+- vector_store.py **只连 Qdrant 不连 PostgreSQL**，取正文是 retrieval.py 的活
+- RRF 融合看**排名**，不是看词重叠（词重叠是 lexical_similarity 另一条线）
+- 用 DeepSeek 是改 **.env 配置**，不是改 llm.py 的 openai 函数代码
+
+### 面试题完成
+
+- Q25：向量库为什么快（HNSW）
+- Q26：余弦相似度 vs 欧氏距离
+- Q27：为什么需要单独 Rerank 模型
+- Q28：Rerank 降级设计
+- Q29：策略 + 工厂模式切换模型
+- Q30：流式输出 + 异步
+
+### 详细笔记
+
+- [Day 7 — Core 层深度解析](day07-core-layer.md)
+
+---
+
 ## Day 6 — 2026-09-12
 
 ### 今日学习内容
