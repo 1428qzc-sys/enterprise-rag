@@ -178,3 +178,72 @@ BaseLLM (ABC)
 | Q30 | 什么是流式输出？异步解决什么？ | Streaming + Async |
 
 （详细参考答案见桌面《enterprise-rag学习笔记.docx》面试题汇总）
+
+---
+
+## 八、动手实验（Phase 3）& 真实 Bug 排查
+
+> 环境：Docker 5 容器全 healthy（端口 19020-19024）。后端源码在容器内，配置经 `.env` → `docker-compose.yml` environment 映射 → 容器环境变量 → pydantic settings 加载。
+
+### 8.1 实验一：入库全链路验证
+
+上传 `量子计算机.txt`（459 字）到新库，验证 Day 6 + 今日 core 层：
+
+| 验证点 | 结果 | 对应代码 |
+|--------|------|---------|
+| chunk 生成 | 1 块（459<800） | `chunking.py` |
+| is_active | True（已激活） | `ingestion.py` 版本切换 |
+| injection_risk | False（过注入检测） | `ingestion.py` 正则检测 |
+| DB chunk 数 = Qdrant 向量数 | 1 = 1 ✅ | `ingestion.py` 一致性对账 |
+| Qdrant distance | **Cosine** | `vector_store.py` ensure_collection |
+| Qdrant dim | 1536 | embeddings 配置 |
+
+> 关键手段：后端**不打逐步入库日志**（只有 http_request 事件），验证入库要用 API —— `GET .../documents/{id}`（看 status/chunk_count/consistency_status）、`GET .../chunks`（看切块内容）、`curl localhost:19022/collections/{name}`（直接数 Qdrant 向量）。
+
+### 8.2 实验二：问答全链路验证
+
+提问"谷歌的悬铃木处理器实现了什么"，SSE `meta` 事件 diagnostics 实测：
+
+```
+total 50ms
+├─ vector  36.4ms  candidate=1  min_score=0.05   ← Qdrant HNSW 检索
+├─ bm25     8.1ms  candidate=1                    ← 内存索引，快
+├─ fusion   3.4ms  method=rrf  rrf_k=60           ← RRF 融合，k=60 实锤
+├─ rerank   0.36ms provider=lexical               ← 注意是 lexical 非 cross_encoder
+└─ evidence_gate  min_score=0.11  accepted=1       ← 门控阈值 0.11 实锤
+```
+
+sources 事件分数拆解（**混合检索价值的活教材**）：
+- `vector_score=0.093`（低！fake embedding 无真语义，向量检索几乎失效）
+- `bm25_score=0.857`（高！"悬铃木/谷歌/处理器"关键词精确命中）
+- → 向量这一路废了，BM25 把正确片段捞回来，印证"两路互补"
+
+token 事件逐个吐字（"谷歌"→"的"→"悬"→"铃"…）= `llm.py` astream 流式输出。
+最终答案：`谷歌的"悬铃木"处理器在2019年宣称实现量子霸权，用200秒…[1]` —— 忠实原文无幻觉，带 [1] 引用（引用校验通过）。
+
+> 补充：`RERANK_PROVIDER` 默认 `lexical`（compose 里 `${RERANK_PROVIDER:-lexical}`），所以没走 CrossEncoder，rerank 才只花 0.36ms。要用真 Cross-Encoder 需配 `RERANK_PROVIDER=cross_encoder` 并装 sentence-transformers 模型。
+
+### 8.3 实验三：改 chunk_size 看效果
+
+| chunk_size | 同一篇 459 字文档切成 |
+|-----------|---------------------|
+| 800 | 1 块 |
+| 200 | 3 块（144/173/138 字） |
+
+overlap 本次未明显体现：RecursiveCharacterTextSplitter 先按 `\n\n` 段落切，各块都在句号自然边界断开、未触发"句中超长硬切"，所以看不到重叠字符。要观察 overlap 需把 chunk_size 调到比一句话还短（如 50）逼它硬切。
+
+### 8.4 两个真实 Bug 排查（重点，面试可讲）
+
+**Bug 1：入库卡 progress=45，报 `NotFoundError: 404`**
+- 根因：`.env` 里 `EMBEDDING_PROVIDER=openai` + `EMBEDDING_BASE_URL=api.deepseek.com` + `EMBEDDING_MODEL=text-embedding-3-small`。**DeepSeek 不提供 Embedding 接口**（只有 chat），拿 OpenAI 的模型名去 DeepSeek 请求 `/embeddings` → 404，向量化步失败。
+- 深层坑：**知识库创建时会把 embedding 配置（provider/model/dim）快照进 DB，优先于全局 .env**。所以改全局 .env 对**已存在的 KB 无效**，必须**新建 KB** 才会用新配置。这也是"换库不串味"设计——防止老库向量维度和新库对不上。
+- 修复：`EMBEDDING_PROVIDER=fake`（本地词袋哈希，零外部依赖）+ 新建 KB。注意 LLM 仍可用 DeepSeek（chat 接口存在），只有 Embedding 不行。
+
+**Bug 2：改 `.env` 的 CHUNK_SIZE 不生效**
+- 根因：`CHUNK_SIZE`/`CHUNK_OVERLAP` **不在 docker-compose.yml backend 的 environment 映射列表里**，所以 .env 的值传不进容器，容器用代码默认值（config.py `chunk_size=800`）。
+- 环境变量传递链：`.env` → compose `environment: ${VAR:-default}` → 容器 env → pydantic settings。中间断一环就失效。
+- 修复：在 compose backend environment 补 `CHUNK_SIZE: ${CHUNK_SIZE:-800}` 和 `CHUNK_OVERLAP: ${CHUNK_OVERLAP:-120}`，重建容器后生效。
+
+### 8.5 安全提醒
+
+`.env` 里 DeepSeek API Key 明文存储且已在排查中暴露，实验后应在 DeepSeek 后台**重置密钥**。`.env` 已被 gitignore（不会进仓库），`.env.example` 模板默认 `fake` 是正确示范。
