@@ -125,6 +125,14 @@ def make_llm(provider: Optional[str] = None, model: Optional[str] = None) -> Bas
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
         )
+    if provider == "lmstudio":
+        return OpenAILLM(
+            model=model,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            base_url="http://localhost:1234/v1",
+            api_key="not-needed",
+        )
     if provider == "ollama":
         return OllamaLLM(
             model=model,
