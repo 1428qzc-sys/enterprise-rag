@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     max_context_chars: int = 6000
     # 只有达到该确定性词项相似度的分块才可进入生成上下文；检索预览仍返回全部候选。
     # 默认值由固定评估集的可回答/无答案样本分布确定，可通过环境变量调整。
-    rag_min_evidence_score: float = 0.11
+    rag_min_evidence_score: float = 0.2
 
     # ---------------- 上传 ----------------
     upload_dir: str = "./data/uploads"

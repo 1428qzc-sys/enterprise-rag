@@ -84,7 +84,7 @@ def retrieve_with_diagnostics(
     total_started = perf_counter()
     final_k = top_k or settings.hybrid_top_k
     degraded_reasons: List[str] = []
-
+    print(f"[RETRIEVAL DEBUG] query={query}, top_k={final_k}")
     vector_started = perf_counter()
     vector_rank: List[str] = []
     vector_scores: Dict[str, float] = {}
@@ -228,6 +228,7 @@ def retrieve_with_diagnostics(
         "rerank": rerank_diagnostics,
     }
     observe_retrieval(diagnostics)
+    print(f"[RETRIEVAL DEBUG] returned {len(results)} chunks")
     return RetrievalResult(chunks=results, diagnostics=diagnostics)
 
 

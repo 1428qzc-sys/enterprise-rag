@@ -117,6 +117,7 @@ services:
       URL_FETCH_MAX_MB: ${URL_FETCH_MAX_MB:-5}
     volumes:
       - ragdata:/app/data
+      - ./backend/app:/app/app
     ports:
       - "${BACKEND_HOST_PORT:-19021}:8000"
     healthcheck:
