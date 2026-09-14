@@ -8,7 +8,7 @@
 """
 
 from __future__ import annotations
-
+import time
 import re
 from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
@@ -355,6 +355,7 @@ async def run_rag_stream(
             },
         }
         return
+    t0 = time.perf_counter()
     try:
         conv, sources, messages, used_query, diagnostics = await _prepare(
             session,
@@ -366,10 +367,11 @@ async def run_rag_stream(
             user_id,
             request_id,
         )
+
     except Exception as exc:  # noqa: BLE001
         yield {"event": "error", "data": {"message": f"检索准备失败：{exc}"}}
         return
-
+    retrieval_time = time.perf_counter() - t0
     yield {
         "event": "meta",
         "data": {
@@ -377,6 +379,7 @@ async def run_rag_stream(
             "request_id": request_id,
             "used_query": used_query,
             "diagnostics": diagnostics,
+            "retrieval_time_ms": round(retrieval_time * 1000, 2),
         },
     }
     yield {"event": "sources", "data": [s.model_dump() for s in sources]}
@@ -397,7 +400,7 @@ async def run_rag_stream(
             },
         }
         return
-
+    t1 = time.perf_counter()
     parts: List[str] = []
     try:
         async for delta in make_llm().astream(messages):
@@ -406,7 +409,7 @@ async def run_rag_stream(
     except Exception as exc:  # noqa: BLE001
         yield {"event": "error", "data": {"message": f"生成失败：{exc}"}}
         return
-
+    llm_time = time.perf_counter() - t1
     raw_answer = "".join(parts)
     answer, cited_sources = validate_answer_citations(raw_answer, sources)
     if answer != raw_answer or len(cited_sources) != len(sources):
@@ -427,6 +430,7 @@ async def run_rag_stream(
             "answer": answer,
             "sources": [source.model_dump() for source in cited_sources],
             "diagnostics": diagnostics,
+            "total_time_ms": round((retrieval_time + llm_time) * 1000, 2),
         },
     }
 
